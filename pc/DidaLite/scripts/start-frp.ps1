@@ -103,7 +103,7 @@ function Get-SakuraTunnels {
     try {
         return @(Invoke-RestMethod -Uri "https://api.natfrp.com/v4/tunnels?token=$token" -TimeoutSec 8)
     } catch {
-        return @()
+        return $null
     }
 }
 
@@ -198,6 +198,12 @@ if ($PublicUrl) {
     }
 
     $tunnels = Get-SakuraTunnels $token
+    if ($null -eq $tunnels) {
+        Write-Host '  查不到隧道列表（登录凭证可能失效，或网络不通）。' -ForegroundColor Yellow
+        Write-Host '  打开樱花启动器重新登录一次，再运行本脚本。' -ForegroundColor Yellow
+        Start-Process $launcher
+        exit 1
+    }
     if ($tunnels.Count -eq 0) {
         Write-Host '  账号下还没有隧道。' -ForegroundColor Yellow
         Show-CreateTunnelHelp
@@ -265,7 +271,11 @@ if ($PublicUrl) {
     }
 
     if (-not $PublicUrl) {
-        Write-Host "  隧道在线，但地址 $($candidates -join ' / ') 打不通本机同步服务。" -ForegroundColor Red
+        if ($candidates.Count -eq 0) {
+            Write-Host '  没能从樱花日志里读到隧道地址。' -ForegroundColor Red
+        } else {
+            Write-Host "  隧道在线，但地址 $($candidates -join ' / ') 打不通本机同步服务。" -ForegroundColor Red
+        }
         Write-Host '  请确认：' -ForegroundColor Yellow
         Write-Host "    · 隧道「本地端口」是 $SyncPort"
         Write-Host '    · 隧道已开「自动 HTTPS」'
