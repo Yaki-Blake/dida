@@ -1,0 +1,19 @@
+# 本地配置（含数据库密码、内网地址），不提交
+.env
+**/.env
+
+# Android 本机 SDK 路径
+local.properties
+**/local.properties
+
+# 构建产物
+bin/
+obj/
+publish/
+pc/DidaLite/installer/stage/
+build/
+.gradle/
+.idea/
+*.user
+*.apk
+*.msi

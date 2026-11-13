@@ -1,0 +1,247 @@
+<UserControl x:Class="DidaLite.App.Views.FocusView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <!-- 专注页：倒计时 / 秒表 / 闹钟 -->
+    <Grid Margin="8,0,8,16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" HorizontalAlignment="Left"
+                Background="{DynamicResource bg-surface}"
+                BorderBrush="{DynamicResource line}" BorderThickness="1"
+                CornerRadius="{StaticResource RadiusM}" Padding="2">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="倒计时" Style="{StaticResource SegmentButton}"
+                        Tag="{Binding Focus.IsCountdownTab}"
+                        Command="{Binding Focus.ShowTabCommand}" CommandParameter="countdown" />
+                <Button Content="秒表" Style="{StaticResource SegmentButton}"
+                        Tag="{Binding Focus.IsStopwatchTab}"
+                        Command="{Binding Focus.ShowTabCommand}" CommandParameter="stopwatch" />
+                <Button Content="闹钟" Style="{StaticResource SegmentButton}"
+                        Tag="{Binding Focus.IsAlarmTab}"
+                        Command="{Binding Focus.ShowTabCommand}" CommandParameter="alarm" />
+            </StackPanel>
+        </Border>
+
+        <!-- 倒计时 -->
+        <Border Grid.Row="1" Margin="0,12,0,0"
+                Background="{DynamicResource bg-surface}"
+                BorderBrush="{DynamicResource line}" BorderThickness="1"
+                CornerRadius="{StaticResource RadiusL}"
+                Visibility="{Binding Focus.IsCountdownTab, Converter={StaticResource BoolToVis}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding Focus.CountdownText}"
+                               FontFamily="{StaticResource AppFont}"
+                               FontSize="{StaticResource FontSizeHero}"
+                               FontWeight="Light"
+                               Foreground="{DynamicResource text-primary}"
+                               Typography.NumeralAlignment="Tabular"
+                               HorizontalAlignment="Center" />
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0"
+                                Visibility="{Binding Focus.IsCountdownEditing, Converter={StaticResource BoolToVis}}">
+                        <TextBox Style="{StaticResource InputTextBox}" Width="52"
+                                 TextAlignment="Center"
+                                 Text="{Binding Focus.CountdownHour, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Text="时" Style="{StaticResource MetaText}" Margin="6,0,14,0" />
+                        <TextBox Style="{StaticResource InputTextBox}" Width="52"
+                                 TextAlignment="Center"
+                                 Text="{Binding Focus.CountdownMinute, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Text="分" Style="{StaticResource MetaText}" Margin="6,0,14,0" />
+                        <TextBox Style="{StaticResource InputTextBox}" Width="52"
+                                 TextAlignment="Center"
+                                 Text="{Binding Focus.CountdownSecond, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Text="秒" Style="{StaticResource MetaText}" Margin="6,0,0,0" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
+                        <Button Content="{Binding Focus.CountdownButtonText}"
+                                Style="{StaticResource PrimaryButton}" MinWidth="96"
+                                Command="{Binding Focus.ToggleCountdownCommand}" />
+                        <Button Content="重置" Style="{StaticResource GhostButton}"
+                                Margin="8,0,0,0"
+                                Command="{Binding Focus.ResetCountdownCommand}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center"
+                            Margin="0,0,0,20">
+                    <TextBlock Text="快捷时长" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                    <Button Content="5 分钟" Style="{StaticResource GhostButton}" Margin="10,0,0,0"
+                            Command="{Binding Focus.SetCountdownPresetCommand}" CommandParameter="5" />
+                    <Button Content="10 分钟" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                            Command="{Binding Focus.SetCountdownPresetCommand}" CommandParameter="10" />
+                    <Button Content="25 分钟" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                            Command="{Binding Focus.SetCountdownPresetCommand}" CommandParameter="25" />
+                    <Button Content="45 分钟" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                            Command="{Binding Focus.SetCountdownPresetCommand}" CommandParameter="45" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 秒表 -->
+        <Border Grid.Row="1" Margin="0,12,0,0"
+                Background="{DynamicResource bg-surface}"
+                BorderBrush="{DynamicResource line}" BorderThickness="1"
+                CornerRadius="{StaticResource RadiusL}"
+                Visibility="{Binding Focus.IsStopwatchTab, Converter={StaticResource BoolToVis}}">
+            <Grid Margin="24,24,24,20">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="{Binding Focus.StopwatchText}"
+                           FontFamily="{StaticResource AppFont}"
+                           FontSize="{StaticResource FontSizeHero}"
+                           FontWeight="Light"
+                           Foreground="{DynamicResource text-primary}"
+                           Typography.NumeralAlignment="Tabular"
+                           HorizontalAlignment="Center" />
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center"
+                            Margin="0,20,0,16">
+                    <Button Content="{Binding Focus.StopwatchButtonText}"
+                            Style="{StaticResource PrimaryButton}" MinWidth="96"
+                            Command="{Binding Focus.ToggleStopwatchCommand}" />
+                    <Button Content="计次" Style="{StaticResource GhostButton}" Margin="8,0,0,0"
+                            Command="{Binding Focus.LapCommand}" />
+                    <Button Content="重置" Style="{StaticResource GhostButton}" Margin="8,0,0,0"
+                            Command="{Binding Focus.ResetStopwatchCommand}" />
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Focus.Laps}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource line}" BorderThickness="0,0,0,1"
+                                        Padding="4,7,4,7">
+                                    <TextBlock Text="{Binding}" Style="{StaticResource MetaText}"
+                                               Typography.NumeralAlignment="Tabular" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- 闹钟 -->
+        <Border Grid.Row="1" Margin="0,12,0,0"
+                Background="{DynamicResource bg-surface}"
+                BorderBrush="{DynamicResource line}" BorderThickness="1"
+                CornerRadius="{StaticResource RadiusL}"
+                Visibility="{Binding Focus.IsAlarmTab, Converter={StaticResource BoolToVis}}">
+            <Grid Margin="20,16,20,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- 新建闹钟 -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBox Style="{StaticResource InputTextBox}" Width="46" TextAlignment="Center"
+                             Text="{Binding Focus.NewAlarmHour, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Text=":" Style="{StaticResource MetaText}" Margin="4,0,4,0" />
+                    <TextBox Style="{StaticResource InputTextBox}" Width="46" TextAlignment="Center"
+                             Text="{Binding Focus.NewAlarmMinute, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <Border Background="{DynamicResource bg-app}" BorderBrush="{DynamicResource line}"
+                            BorderThickness="1" CornerRadius="{StaticResource RadiusM}"
+                            Padding="2" Margin="14,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="单次" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding Focus.IsOnceRepeat}"
+                                    Command="{Binding Focus.SetRepeatCommand}" CommandParameter="once" />
+                            <Button Content="每天" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding Focus.IsDailyRepeat}"
+                                    Command="{Binding Focus.SetRepeatCommand}" CommandParameter="daily" />
+                            <Button Content="工作日" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding Focus.IsWeekdayRepeat}"
+                                    Command="{Binding Focus.SetRepeatCommand}" CommandParameter="weekday" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBox Style="{StaticResource InputTextBox}" Width="140" Margin="14,0,0,0"
+                             Text="{Binding Focus.NewAlarmLabel, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="标签（可留空）" />
+
+                    <Button Content="添加闹钟" Style="{StaticResource PrimaryButton}" Margin="10,0,0,0"
+                            Command="{Binding Focus.AddAlarmCommand}" />
+                </StackPanel>
+
+                <Border Grid.Row="1" Height="1" Background="{DynamicResource line}" Margin="0,14,0,0" />
+
+                <!-- 闹钟列表 -->
+                <ScrollViewer Grid.Row="2" Margin="0,4,0,0" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Focus.Alarms}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,6,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Grid.Column="0" Text="{Binding TimeText}"
+                                               FontSize="{StaticResource FontSize28}"
+                                               FontFamily="{StaticResource AppFont}"
+                                               Foreground="{DynamicResource text-primary}"
+                                               Typography.NumeralAlignment="Tabular"
+                                               VerticalAlignment="Center" />
+
+                                    <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" Style="{StaticResource RowTitle}" />
+                                        <TextBlock Text="{Binding RepeatText}" Style="{StaticResource HintText}"
+                                                   Margin="0,2,0,0" />
+                                    </StackPanel>
+
+                                    <ToggleButton Grid.Column="2" Style="{StaticResource AlarmTogglePill}"
+                                                  Margin="0,0,14,0"
+                                                  IsChecked="{Binding Enabled, Mode=TwoWay}" />
+
+                                    <Button Grid.Column="3" Content="删除"
+                                            Style="{StaticResource DangerGhostButton}"
+                                            VerticalAlignment="Center"
+                                            Command="{Binding DataContext.Focus.DeleteAlarmCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <StackPanel Grid.Row="3" Orientation="Horizontal" VerticalAlignment="Center"
+                            Margin="0,10,0,0">
+                    <TextBlock Text="铃声" Style="{StaticResource HintText}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Focus.RingName}" Style="{StaticResource MetaText}"
+                               Margin="10,0,0,0" MaxWidth="240"
+                               TextTrimming="CharacterEllipsis" />
+                    <Button Content="选择文件" Style="{StaticResource GhostButton}" Margin="12,0,0,0"
+                            Command="{Binding Focus.PickRingCommand}" />
+                    <Button Content="试听" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                            Command="{Binding Focus.TestRingCommand}" />
+                    <Button Content="恢复默认" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                            Command="{Binding Focus.ResetRingCommand}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

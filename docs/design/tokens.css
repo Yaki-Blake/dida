@@ -1,0 +1,41 @@
+/* Hallmark · v2.0.0 · dose (manual pick, fast) */
+/* critique: 两屏并排，一屏只做一件事——左屏同步、右屏闹钟；信息层级靠字号与留白，不靠颜色堆叠。 */
+/* waive: 47a 手机外框用于承载真实手机界面的形态，不是手绘浏览器或系统窗口装饰。 */
+:root {
+  --color-paper: oklch(97.6% 0.011 88);
+  --color-paper-2: oklch(96.5% 0.02 160);
+  --color-paper-3: oklch(93% 0.036 160);
+  --color-ink: oklch(21% 0.025 170);
+  --color-ink-2: oklch(31% 0.02 170);
+  --color-muted: oklch(49% 0.024 165);
+  --color-rule: oklch(86.5% 0.022 140);
+  --color-accent: oklch(50% 0.13 160);
+  --color-accent-deep: oklch(42% 0.11 162);
+  --color-accent-soft: oklch(88% 0.08 160);
+  --color-accent-ink: oklch(99% 0.006 160);
+  --color-focus: oklch(45% 0.14 160);
+  --glint: oklch(100% 0 0);
+
+  --font-display: "Schibsted Grotesk", ui-sans-serif, sans-serif;
+  --font-body: "Instrument Sans", ui-sans-serif, sans-serif;
+  --font-outlier: "DM Mono", ui-monospace, monospace;
+
+  --radius-screen: 28px;
+  --radius-card: 14px;
+  --radius-control: 10px;
+
+  --shadow-screen: 0 1px 3px oklch(30% 0.03 165 / 0.10);
+  --shadow-control: inset 0 1px 0 var(--glint), 0 0 0 1px var(--color-rule), 0 2px 0 var(--color-rule);
+
+  --step-1: 12px;
+  --step-2: 14px;
+  --step-3: 16px;
+  --step-4: 22px;
+  --step-5: 30px;
+
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 36px;
+}

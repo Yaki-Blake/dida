@@ -1,0 +1,90 @@
+<UserControl x:Class="DidaLite.App.Views.MonthView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:beh="clr-namespace:DidaLite.App.Behaviors">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <!-- 月视图 -->
+    <Border Margin="20,0,20,20"
+            Background="{DynamicResource bg-surface}"
+            BorderBrush="{DynamicResource line}" BorderThickness="1"
+            CornerRadius="{StaticResource RadiusM}">
+        <Grid x:Name="MonthHost" Margin="8,8,8,8" SizeChanged="OnHostSizeChanged">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid x:Name="WeekHeaderRow" Grid.Row="0" Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Width="{StaticResource MonthToggleWidth}" />
+
+                <ItemsControl Grid.Column="1" ItemsSource="{Binding WeekDays}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Columns="7" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" Style="{StaticResource HintText}"
+                                       HorizontalAlignment="Left" Margin="7,0,0,0" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding MonthWeeks}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <!-- 行容器承担高度过渡：展开 / 收起时平滑撑开或收拢 -->
+                            <Border beh:SmoothHeight.Value="{Binding RowHeight}"
+                                    ClipToBounds="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border Grid.Column="0" Width="{StaticResource MonthToggleWidth}">
+                                        <Button Content="{Binding ToggleText}"
+                                                Style="{StaticResource WeekToggleButton}"
+                                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                Visibility="{Binding CanExpand, Converter={StaticResource BoolToVis}}"
+                                                Command="{Binding DataContext.ToggleWeekCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}" />
+                                    </Border>
+
+                                    <ItemsControl Grid.Column="1" ItemsSource="{Binding Cells}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <UniformGrid Columns="7" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Style="{StaticResource MonthCellButton}"
+                                                        MinHeight="{Binding DataContext.MonthRowHeight, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        Command="{Binding DataContext.SelectMonthCellCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</UserControl>

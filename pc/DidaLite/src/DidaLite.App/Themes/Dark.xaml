@@ -1,0 +1,19 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 深色主题：计划书 6.2 颜色令牌深色列 -->
+    <SolidColorBrush x:Key="bg-app" Color="#16171A" />
+    <SolidColorBrush x:Key="bg-surface" Color="#1F2126" />
+    <SolidColorBrush x:Key="bg-hover" Color="#262930" />
+    <SolidColorBrush x:Key="text-primary" Color="#E8EAED" />
+    <SolidColorBrush x:Key="text-secondary" Color="#9AA0A6" />
+    <SolidColorBrush x:Key="text-tertiary" Color="#6B7075" />
+    <SolidColorBrush x:Key="line" Color="#2C2F36" />
+    <SolidColorBrush x:Key="accent" Color="#3FB98D" />
+    <SolidColorBrush x:Key="accent-weak" Color="#1E3A31" />
+    <SolidColorBrush x:Key="danger" Color="#F07167" />
+    <SolidColorBrush x:Key="warning" Color="#E8B44C" />
+    <SolidColorBrush x:Key="on-accent" Color="#0E2B22" />
+    <SolidColorBrush x:Key="overlay-shadow" Color="#000000" />
+    <!-- 深色主题浮层阴影更重 -->
+    <DropShadowEffect x:Key="OverlayShadow" Color="#000000" BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.40" />
+</ResourceDictionary>

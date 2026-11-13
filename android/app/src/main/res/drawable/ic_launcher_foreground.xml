@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 应用标记：表盘 + 对勾。滴答一声，事情办完。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M26.5,54a27.5,27.5 0 1,1 55,0a27.5,27.5 0 1,1 -55,0"
+        android:strokeColor="#0F6E4F"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M42,54.5L50.5,63L67,44.5"
+        android:strokeColor="#1F8A63"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+</vector>

@@ -1,0 +1,11 @@
+# 构建产物
+bin/
+obj/
+
+# 本地配置与密钥
+.env
+*.user
+*.suo
+
+# 发布产物
+publish/

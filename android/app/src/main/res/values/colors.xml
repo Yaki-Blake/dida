@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与 Ui.kt 的纸色令牌一致 -->
+    <color name="dida_paper">#F7F5EF</color>
+    <color name="ic_launcher_background">#F7F5EF</color>
+</resources>

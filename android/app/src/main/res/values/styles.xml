@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- 纸色窗口底：冷启动时不会先闪一帧白，Android 12+ 的系统启动页也取这个颜色 -->
+    <style name="Theme.Dida" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowBackground">@color/dida_paper</item>
+        <item name="android:statusBarColor">@color/dida_paper</item>
+        <item name="android:navigationBarColor">@color/dida_paper</item>
+    </style>
+
+</resources>

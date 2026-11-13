@@ -1,0 +1,22 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <OutputName>dida</OutputName>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- 按用户安装（%LOCALAPPDATA%），文件键路径不在 HKCU 下，忽略只在多用户场景才有意义的 ICE -->
+    <SuppressIces>ICE38;ICE43;ICE61;ICE64</SuppressIces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Heat" Version="6.0.2" />
+    <!-- Heat 生成的 File 源路径以 SourceDir\ 开头，必须把 stage 目录登记为绑定路径 -->
+    <BindPath Include="$(MSBuildThisFileDirectory)stage" />
+    <HarvestDirectory Include="$(MSBuildThisFileDirectory)stage">
+      <ComponentGroupName>PublishedFiles</ComponentGroupName>
+      <DirectoryRefId>INSTALLFOLDER</DirectoryRefId>
+      <SuppressRootDirectory>true</SuppressRootDirectory>
+      <SuppressRegistry>true</SuppressRegistry>
+      <SuppressCom>true</SuppressCom>
+    </HarvestDirectory>
+  </ItemGroup>
+</Project>

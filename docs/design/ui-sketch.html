@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>滴答 · 手机界面草图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@700&family=Instrument+Sans:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<meta name="description" content="滴答手机端两屏草图：首页只有上传、下载与同步及本次结果；闹钟页只显示电脑端闹钟并可写入系统时钟。">
+<style>
+/* 样式令牌见 tokens.css 首行 Hallmark 戳 */
+* { box-sizing: border-box; }
+
+html, body { overflow-x: clip; }
+
+html {
+  background: var(--color-paper);
+  scrollbar-color: var(--color-rule) var(--color-paper);
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--step-3);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  overflow-wrap: break-word;
+  min-width: 0;
+  text-wrap: balance;
+}
+
+::selection { background: var(--color-accent-soft); color: var(--color-ink); }
+
+.wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
+}
+
+.page-head { max-width: 600px; margin-bottom: var(--space-5); }
+
+h1 { font-size: var(--step-5); }
+
+.lede {
+  margin: var(--space-2) 0 0;
+  font-size: var(--step-3);
+  color: var(--color-ink-2);
+}
+
+.aside {
+  margin: var(--space-1) 0 0;
+  font-size: var(--step-1);
+  color: var(--color-muted);
+}
+
+.screens {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.unit { min-width: 0; }
+
+.screen {
+  width: 100%;
+  max-width: 360px;
+  min-height: 640px;
+  padding: var(--space-4) var(--space-3);
+  background: var(--glint);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-screen);
+  box-shadow: var(--shadow-screen);
+}
+
+.app-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.app-head h2 { font-size: var(--step-4); }
+
+.text-btn {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: 500 var(--step-1) var(--font-body);
+  color: var(--color-accent-deep);
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+
+.text-btn:hover { color: var(--color-accent); text-decoration: underline; }
+
+.status {
+  margin: var(--space-3) 0 0;
+  font-size: var(--step-2);
+  color: var(--color-ink-2);
+}
+
+.stamp-line {
+  margin: 2px 0 0;
+  font-size: var(--step-1);
+  color: var(--color-muted);
+}
+
+.mono { font-family: var(--font-outlier); font-variant-numeric: tabular-nums; }
+.muted { color: var(--color-muted); }
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+  margin-top: var(--space-4);
+}
+
+.btn {
+  min-height: 46px;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font: 500 var(--step-2) var(--font-body);
+  box-shadow: var(--shadow-control);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.btn:hover { background: var(--color-paper-3); }
+.btn:active { transform: translateY(2px); }
+
+.btn--primary {
+  background: var(--color-accent-deep);
+  color: var(--color-accent-ink);
+  box-shadow: inset 0 1px 0 var(--glint), 0 2px 0 var(--color-accent-deep);
+}
+
+.btn--primary:hover { background: var(--color-accent); }
+
+.btn:disabled,
+.text-btn:disabled {
+  background: var(--color-paper-2);
+  color: var(--color-muted);
+  box-shadow: none;
+  cursor: default;
+  transform: none;
+}
+
+.btn--small {
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-control);
+  font-size: var(--step-1);
+}
+
+.result {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-rule);
+}
+
+.result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.result-head h3 {
+  font-family: var(--font-body);
+  font-size: var(--step-1);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--color-ink-2);
+}
+
+.changes { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+
+.changes li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+  font-size: var(--step-2);
+}
+
+.mark { width: 14px; font-family: var(--font-outlier); }
+.mark--up { color: var(--color-accent-deep); }
+.mark--down { color: var(--color-ink-2); }
+.mark--gone { color: var(--color-muted); }
+
+.note {
+  margin-left: auto;
+  font-size: var(--step-1);
+  color: var(--color-muted);
+}
+
+.footnote {
+  margin: var(--space-4) 0 0;
+  font-size: var(--step-1);
+  color: var(--color-muted);
+}
+
+.alarms { list-style: none; margin: var(--space-3) 0 0; padding: 0; }
+
+.alarm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.alarm:last-child { border-bottom: 0; }
+
+.alarm-time { font-size: var(--step-4); font-weight: 500; }
+
+.alarm-meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.alarm-meta span:first-child { font-size: var(--step-2); }
+.alarm-meta .muted { font-size: var(--step-1); }
+
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+@media (max-width: 760px) {
+  .wrap { padding: var(--space-4) var(--space-3); }
+  h1 { font-size: var(--step-4); }
+  .screens { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="page-head">
+    <h1>滴答 · 手机界面</h1>
+    <p class="lede">电脑放数据，手机只做三件事：传上去、拉下来、看结果。</p>
+    <p class="aside">按 360×720 画的两屏草图。闹钟页只认电脑端「闹钟」里的条目。</p>
+  </header>
+
+  <div class="screens">
+    <section class="unit">
+      <div class="screen">
+        <div class="app-head">
+          <h2>滴答</h2>
+          <button class="text-btn" type="button">设置</button>
+        </div>
+
+        <p class="status">已登入，可以同步</p>
+        <p class="stamp-line"><span class="mono">昨天 21:06</span> 上次同步</p>
+
+        <div class="actions">
+          <button class="btn" type="button">仅上传</button>
+          <button class="btn" type="button">仅下载</button>
+          <button class="btn btn--primary" type="button">同步</button>
+        </div>
+
+        <div class="result">
+          <div class="result-head">
+            <h3>这次同步</h3>
+            <span class="mono muted">刚刚</span>
+          </div>
+          <ul class="changes">
+            <li><span class="mark mark--up">↑</span>交房租<span class="note">已上传</span></li>
+            <li><span class="mark mark--down">↓</span>周会纪要<span class="note">已下载</span></li>
+            <li><span class="mark mark--down">↓</span>闹钟 3 个<span class="note">已下载</span></li>
+            <li><span class="mark mark--gone">×</span>旧待办<span class="note">本机已删除</span></li>
+          </ul>
+        </div>
+
+        <p class="footnote">只上传改动过的待办。闹钟单独同步，不混进待办列表。</p>
+      </div>
+    </section>
+
+    <section class="unit">
+      <div class="screen">
+        <div class="app-head">
+          <h2>闹钟</h2>
+          <button class="text-btn" type="button">打开时钟</button>
+        </div>
+
+        <p class="status">只显示电脑端「闹钟」里的闹钟，不含待办提醒和日历日程。</p>
+
+        <ul class="alarms">
+          <li class="alarm">
+            <span class="alarm-time mono">07:00</span>
+            <span class="alarm-meta"><span>起床</span><span class="muted">每天</span></span>
+            <button class="btn btn--small" type="button">写入</button>
+          </li>
+          <li class="alarm">
+            <span class="alarm-time mono">09:30</span>
+            <span class="alarm-meta"><span>站会</span><span class="muted">工作日</span></span>
+            <button class="btn btn--small" type="button">写入</button>
+          </li>
+          <li class="alarm">
+            <span class="alarm-time mono">21:30</span>
+            <span class="alarm-meta"><span>星辰月会</span><span class="muted">单次</span></span>
+            <button class="btn btn--small" type="button" disabled>已唤起</button>
+          </li>
+        </ul>
+
+        <p class="footnote">「写入」只把时分和名称预填到系统时钟的新建页，保存后由时钟负责响。</p>
+      </div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

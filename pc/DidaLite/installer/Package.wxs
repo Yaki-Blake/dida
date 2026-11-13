@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- 滴答桌面端安装包：按用户安装到 %LOCALAPPDATA%\Programs\Dida，不需要管理员权限 -->
+  <Package Name="滴答"
+           Manufacturer="DidaLite"
+           Version="0.1.1"
+           Language="2052"
+           Scope="perUser"
+           UpgradeCode="C052EAF5-A735-4C57-831A-F819F7AFFFFB"
+           Compressed="yes">
+
+    <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="已安装更高版本的滴答，请先卸载。" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="DidaIcon" SourceFile="stage\dida.exe" />
+    <Property Id="ARPPRODUCTICON" Value="DidaIcon" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <Feature Id="Main" Title="滴答" Level="1">
+      <ComponentGroupRef Id="PublishedFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Dida" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="滴答">
+        <Component Id="StartMenuShortcut" Guid="*">
+          <Shortcut Id="AppShortcut"
+                    Name="滴答"
+                    Description="待办 · 闹钟 · 日历"
+                    Target="[INSTALLFOLDER]dida.exe"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Icon="DidaIcon" />
+          <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\DidaLite\Dida" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+  </Package>
+</Wix>
