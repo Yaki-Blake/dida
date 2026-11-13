@@ -47,11 +47,12 @@ powershell -ExecutionPolicy Bypass -File pc\DidaLite\installer\build-msi.ps1
 | `start-server.cmd` | 只拉起同步服务 |
 | `start-frp.cmd` | 一键上线：启动桌面端 + 樱花 frp 隧道，手机走公网地址同步 |
 
-`start-frp.cmd` 需要知道自己的公网地址，两种给法任选其一：
+`start-frp.cmd` 会自动完成这几件事：
 
-1. 在 `.env` 里加一行 `DIDA_PUBLIC_URL=https://你的隧道地址`
-2. 命令行传入：`start-frp.cmd -PublicUrl https://你的隧道地址`
+1. 检测樱花 frp 是否安装；没装就打开官方下载页并给出安装步骤
+2. 检查账号下有没有指向本机 5080 的隧道；没有就打开隧道页并给出建隧道参数
+3. 检查隧道是否在线、是否开了「自动 HTTPS」；没开就提示去开
+4. 隧道在线后从樱花日志里取公网地址，确认能打到本机，再写进 `.env` 的 `DIDA_LAN_ADDR`，最后拉起桌面端
 
-它会先确认桌面端在监听 5080，再拉起樱花 frp 启动器（隧道要在启动器里设为自动启动），最后探测这个公网地址是否真能打到同步服务。
-
+需要手动指定地址时可以覆盖：`start-frp.cmd -PublicUrl https://你的隧道地址`。
 数据库连接、同步端口等配置在 `pc\DidaLite\.env`（复制 `.env.example` 后修改，该文件不进版本库），首次运行自动建表。
