@@ -45,7 +45,7 @@ powershell -ExecutionPolicy Bypass -File pc\DidaLite\installer\build-msi.ps1
 | --- | --- |
 | `setup-db.cmd` | 装 MySQL（没装时）/ 启动 MySQL，最后打印本机和手机可用的地址 |
 | `start-server.cmd` | 只拉起同步服务 |
-| `start-frp.cmd` | 一键上线：启动桌面端 + 樱花 frp 隧道，手机走公网地址同步 |
+| `start-frp.cmd` | 一键上线：检测樱花 frp 与隧道、确认自动 HTTPS、把公网地址写进 `.env` 并拉起桌面端 |
 
 `start-frp.cmd` 会自动完成这几件事：
 
