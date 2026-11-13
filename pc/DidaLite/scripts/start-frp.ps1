@@ -23,17 +23,19 @@ function Test-Port {
     try { $c.Connect('127.0.0.1', $p); return $true } catch { return $false } finally { if ($c) { $c.Close() } }
 }
 
-# 从脚本目录往上 4 级找 .env，读指定键
+# 从脚本所在目录、exe 子目录、以及往上的各级目录找 .env，读指定键
 function Get-EnvValue {
     param([string]$key)
+    $candidates = @((Join-Path $here '.env'), (Join-Path $here 'exe\.env'))
     $dir = $here
     for ($i = 0; $i -lt 4 -and $dir; $i++) {
-        $path = Join-Path $dir '.env'
-        if (Test-Path $path) {
-            $line = (Select-String -Path $path -Pattern "^\s*$key\s*=" | Select-Object -First 1).Line
-            if ($line) { return ($line -replace "^\s*$key\s*=", '').Trim() }
-        }
+        $candidates += (Join-Path $dir '.env')
         $dir = Split-Path -Parent $dir
+    }
+    foreach ($path in $candidates) {
+        if (-not (Test-Path $path)) { continue }
+        $line = (Select-String -Path $path -Pattern "^\s*$key\s*=" | Select-Object -First 1).Line
+        if ($line) { return ($line -replace "^\s*$key\s*=", '').Trim() }
     }
     return $null
 }
