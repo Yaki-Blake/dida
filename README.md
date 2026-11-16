@@ -17,8 +17,7 @@ dida
 │  └─ scripts\             setup-db（装库/起库）、start-server（拉起同步服务）、start-frp（樱花 frp 一键上线）
 ├─ android\                手机端（Gradle 工程，包名 com.didalite.android）
 └─ docs\
-   ├─ design\              开发计划书、UI 草图、设计令牌
-   └─ screenshots\         运行截图
+   └─ design\              开发计划书、UI 草图、设计令牌
 ```
 
 ## 编译

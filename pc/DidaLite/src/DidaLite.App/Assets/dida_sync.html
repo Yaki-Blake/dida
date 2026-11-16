@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dida 课表同步助手｜默认浏览器</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 20px 60px; background: #f6f8fa; color: #1f2937;
+         font: 15px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 800px; margin: 0 auto; }
+  h1 { font-size: 23px; margin: 0 0 4px; }
+  .sub { color: #6b7280; margin: 0 0 22px; font-size: 14px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+          padding: 18px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  h2 { font-size: 16px; margin: 0 0 10px; display: flex; align-items: center; gap: 9px; }
+  .num { display: inline-flex; align-items: center; justify-content: center;
+         width: 22px; height: 22px; border-radius: 6px; background: #16a34a;
+         color: #fff; font-size: 13px; flex: none; }
+  .bookmark { display: inline-block; margin: 4px 0 10px; padding: 12px 22px;
+              background: #16a34a; color: #fff !important; text-decoration: none;
+              border-radius: 9px; font-weight: 600; cursor: grab;
+              box-shadow: 0 3px 10px rgba(22,163,74,.26); user-select: none; }
+  .bookmark[aria-disabled="true"] { background: #9ca3af; box-shadow: none; pointer-events: none; }
+  .bookmark:active { cursor: grabbing; }
+  button { font: inherit; border: 1px solid #d1d5db; background: #fff; color: #374151;
+           border-radius: 7px; padding: 7px 13px; cursor: pointer; text-decoration: none;
+           display: inline-block; }
+  button:hover { background: #f3f4f6; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 13px;
+         background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+  .muted { color: #6b7280; font-size: 13px; }
+  .ok { color: #15803d; } .err { color: #b91c1c; }
+  ul { padding-left: 22px; margin: 8px 0; } li { margin: 5px 0; }
+  #status { border-radius: 8px; padding: 9px 12px; background: #f0fdf4;
+            border: 1px solid #bbf7d0; font-size: 13px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>dida 课表同步助手</h1>
+  <p class="sub">用「默认浏览器里已经登录的教务账号」同步课表。不用专用窗口、不用重新登录、密码本照常可用。</p>
+
+  <div id="status">正在连接本机 dida…</div>
+
+  <div class="card">
+    <h2><span class="num">1</span> 把这个按钮拖到书签栏（只需一次）</h2>
+    <a class="bookmark" id="bookmark" href="#" aria-disabled="true" onclick="return false">同步到 dida</a>
+    <div class="muted">Chrome / Edge 按 <code>Ctrl+Shift+B</code> 显示书签栏。书签代码 <span id="len">生成中…</span>。</div>
+    <div class="muted" style="margin-top:6px">拖好后自己在浏览器打开教务课表页，点一下书签即可同步。</div>
+    <div style="margin-top:12px">
+      <button id="copy">复制书签代码</button>
+      <span id="copy-out" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>没反应？</h2>
+    <ul class="muted">
+      <li><b>提示「连不上 dida」</b>：确认 dida 正在运行；本机 5080 被占用时同步服务可能没起来。</li>
+      <li><b>提示「Failed to fetch」/「浏览器拦下了本机请求」</b>：Chrome 的本地网络访问限制常拦住教务页 → <code>127.0.0.1</code> 的跨源请求。保持本助手页开着，书签会自动经本页中转；也可用自动下载的 ICS 在 dida 里点「导入课表」。</li>
+      <li><b>提示「取教务课表失败」</b>：先登录教务系统（校外连学校 VPN），手动打开「我的课表 → 学期理论课表」，看到完整课表后再点书签，此时直接读页面 DOM、零网络请求。</li>
+      <li><b>提示「CSP 拦截」或点了没动静</b>：先手动打开「我的课表 → 学期课表」再点书签；若书签是之前拖的旧版，请回本页重新拖一次。</li>
+      <li><b>走 WebVPN / 代理域名</b>：代理后自动取课表可能被同源判断拦下，请停留在课表页（有 <code>#kbtable</code>）再同步，此时零网络请求。</li>
+      <li><b>登录态失效</b>：在默认浏览器重新登录教务系统（校外先连学校 VPN），再点一次书签。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+(async function () {
+  var status = document.getElementById('status');
+  var link = document.getElementById('bookmark');
+  var bookmarkURL = '';
+
+  window.addEventListener('message', async function (ev) {
+    var d = ev && ev.data;
+    if (!d || d.type !== 'dida-sync-relay' || typeof d.ics !== 'string') return;
+    function reply(ok, message, events) {
+      try {
+        if (ev.source && ev.source.postMessage)
+          ev.source.postMessage(
+            { type: 'dida-sync-relay-result', ok: ok, message: message, events: events },
+            ev.origin || '*');
+      } catch (e) { }
+    }
+    if (d.ics.indexOf('BEGIN:VCALENDAR') !== 0) { reply(false, '数据不是 ICS 日历'); return; }
+    try {
+      var r = await fetch('/api/schedule/import?name=' +
+        encodeURIComponent('默认浏览器同步.ics') + '&source=browser', {
+          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: d.ics
+        });
+      var j = await r.json();
+      reply(!!j.ok, j.message || '', j.events || 0);
+      status.className = j.ok ? 'ok' : 'err';
+      status.style.background = j.ok ? '#f0fdf4' : '#fef2f2';
+      status.style.borderColor = j.ok ? '#bbf7d0' : '#fecaca';
+      status.textContent = j.ok
+        ? '✓ 已通过助手页中转同步：' + (j.events || 0) + ' 节课'
+        : '× 中转失败：' + (j.message || '导入未完成');
+    } catch (e) {
+      reply(false, (e && e.message) || String(e));
+    }
+  });
+
+  function fail(msg) {
+    status.className = 'err';
+    status.style.background = '#fef2f2';
+    status.style.borderColor = '#fecaca';
+    status.textContent = '× ' + msg;
+  }
+
+  try {
+    var parts = await Promise.all([
+      fetch('/gdufe_export.js').then(function (r) { if (!r.ok) throw new Error('核心脚本缺失'); return r.text(); }),
+      fetch('/dida-sync-runner.js').then(function (r) { if (!r.ok) throw new Error('同步脚本缺失'); return r.text(); }),
+      fetch('/api/schedule/sync-config').then(function (r) { return r.json(); }),
+      fetch('/api/health').then(function (r) { return r.json(); })
+    ]);
+    function compact(src) {
+      return src
+        .replace(/^[ \t]*\/\/.*$/gm, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^[ \t]+/gm, '')
+        .replace(/\n{2,}/g, '\n');
+    }
+    var core = compact(parts[0]), runner = compact(parts[1]), cfg = parts[2], health = parts[3];
+
+    var code = '(function(){var CORE=' + JSON.stringify(core) + ',CFG=' + JSON.stringify(cfg) + ';\n' +
+               runner + '\n;didaSyncRunner(CORE,CFG);})()';
+    new Function(code);
+    bookmarkURL = 'javascript:' + encodeURIComponent(code);
+    if (decodeURIComponent(bookmarkURL.slice(11)) !== code) throw new Error('书签 URL 编码往返不一致');
+
+    link.href = bookmarkURL;
+    link.removeAttribute('aria-disabled');
+    document.getElementById('len').textContent = bookmarkURL.length.toLocaleString() + ' 字符';
+    status.className = 'ok';
+    status.textContent = '✓ 已连接 dida：当前 ' + (health.events || 0) + ' 节课 · 学期 ' +
+                         (health.term || cfg.term) + '。书签已就绪，拖到书签栏即可。';
+  } catch (e) {
+    fail('初始化失败：' + ((e && e.message) || e) + '（请确认是通过 dida 的 5080 打开本页）');
+  }
+
+  document.getElementById('copy').onclick = function () {
+    var out = document.getElementById('copy-out');
+    if (!bookmarkURL) { out.className = 'err'; out.textContent = '书签还没生成好'; return; }
+    function done() { out.className = 'ok'; out.textContent = ' ✓ 已复制，新建书签时把代码粘到「网址」里'; }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = bookmarkURL; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); }
+      catch (e) { out.className = 'err'; out.textContent = ' 复制失败，请改用拖拽'; }
+      ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(bookmarkURL).then(done, fallback);
+    else fallback();
+  };
+})();
+</script>
+</body>
+</html>

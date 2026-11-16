@@ -15,12 +15,26 @@ if (-not $SkipPublish) {
     if ($LASTEXITCODE -ne 0) { throw 'dotnet publish 失败' }
 }
 
-# 2. 组装 stage：发布产物改名 dida.exe，再带上 .env 与数据库脚本
+# 2. 组装 stage：发布产物改名 dida.exe，再带上配置模板与数据库脚本
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item (Join-Path $publish '*') $stage -Recurse -Force
 Rename-Item (Join-Path $stage 'DidaLite.App.exe') 'dida.exe'
-Copy-Item (Join-Path $pcRoot '.env') $stage
+
+# 安装包内不放真实数据库口令：只写一份空白模板，用户需要双端同步时自行填写。
+# 留空时程序以纯本地模式运行（EnvFile 取不到连接串 → SyncServer 不启动），不会报错。
+$envTemplate = @'
+# 滴答 · 同步数据库配置（安装包内为空白模板，不含任何口令）
+# 需要用手机双端同步时，把下面一行换成自己的 MySQL 连接串，例如：
+# DIDA_DB_CONNECTION=server=127.0.0.1;port=3306;database=ticktick;user=root;password=你的密码
+# 留空 = 纯本地模式，所有数据只存在本机。
+DIDA_DB_CONNECTION=
+
+# 局域网访问地址（手机在同一 WiFi 下连电脑时填，可留空）
+DIDA_LAN_ADDR=
+'@
+$envTemplate | Set-Content -Path (Join-Path $stage '.env') -Encoding utf8
+
 Copy-Item (Join-Path $pcRoot 'scripts\setup-db.cmd') $stage
 Copy-Item (Join-Path $pcRoot 'scripts\setup-db.ps1') $stage
 

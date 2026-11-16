@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using DidaLite.App.Services;
 using DidaLite.App.ViewModels;
 using DidaLite.Data.Sync;
 
@@ -13,6 +14,7 @@ public partial class SettingsWindow : Window
 {
     private readonly MainViewModel _vm;
     private readonly Func<ModifierKeys, Key, bool> _applyHotkey;
+    private readonly Func<bool, bool> _setHotkeyEnabled;
     private readonly Action<string> _saveAddress;
     private readonly UserStore? _users = UserStore.Create();
 
@@ -21,12 +23,14 @@ public partial class SettingsWindow : Window
     /// <summary>录制前的有效快捷键，Esc 或关窗时用它恢复。</summary>
     private string _effectiveHotkey;
 
-    public SettingsWindow(MainViewModel vm, Func<ModifierKeys, Key, bool> applyHotkey, Action<string> saveAddress)
+    public SettingsWindow(MainViewModel vm, Func<ModifierKeys, Key, bool> applyHotkey,
+        Func<bool, bool> setHotkeyEnabled, Action<string> saveAddress)
     {
         InitializeComponent();
 
         _vm = vm;
         _applyHotkey = applyHotkey;
+        _setHotkeyEnabled = setHotkeyEnabled;
         _saveAddress = saveAddress;
         _effectiveHotkey = vm.HotkeyText;
 
@@ -135,6 +139,32 @@ public partial class SettingsWindow : Window
         _capturingHotkey = true;
         _effectiveHotkey = _vm.HotkeyText;
         _vm.HotkeyText = "请按组合键…";
+    }
+
+    /// <summary>
+    /// 「关闭 / 开启」：关掉后全局热键彻底不响应；再点一下按原来的组合恢复。
+    /// 正在录制时先退出录制，免得两三处状态打架。
+    /// </summary>
+    private async void HotkeyToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_capturingHotkey)
+        {
+            _capturingHotkey = false;
+            _vm.HotkeyText = _effectiveHotkey;
+        }
+
+        // 关着就开、开着就关
+        if (_setHotkeyEnabled(_vm.IsHotkeyOff))
+        {
+            _effectiveHotkey = _vm.HotkeyText;
+            return;
+        }
+
+        // 开启失败通常是组合被别的程序占用了：按「已关闭」收尾，别留下半开状态
+        _vm.HotkeyText = "该组合已被占用";
+        await Task.Delay(1500);
+        _vm.HotkeyText = HotkeyService.Disabled;
+        _effectiveHotkey = _vm.HotkeyText;
     }
 
     /// <summary>录制快捷键：Esc 取消，只按修饰键时继续等，组合可用就立即生效。</summary>

@@ -10,9 +10,19 @@
     <SolidColorBrush x:Key="line" Color="#2C2F36" />
     <SolidColorBrush x:Key="accent" Color="#3FB98D" />
     <SolidColorBrush x:Key="accent-weak" Color="#1E3A31" />
+    <SolidColorBrush x:Key="accent-weak-hover" Color="#25473C" />
     <SolidColorBrush x:Key="danger" Color="#F07167" />
     <SolidColorBrush x:Key="warning" Color="#E8B44C" />
     <SolidColorBrush x:Key="on-accent" Color="#0E2B22" />
+    <!-- 年视图日程热度：色块用于图例，bg 用于日期格底色 -->
+    <SolidColorBrush x:Key="heat-green" Color="#3FB98D" />
+    <SolidColorBrush x:Key="heat-green-bg" Color="#1E3A31" />
+    <SolidColorBrush x:Key="heat-yellow" Color="#E8B44C" />
+    <SolidColorBrush x:Key="heat-yellow-bg" Color="#3A3020" />
+    <SolidColorBrush x:Key="heat-purple" Color="#A78BFA" />
+    <SolidColorBrush x:Key="heat-purple-bg" Color="#2F2A44" />
+    <SolidColorBrush x:Key="heat-red" Color="#F07167" />
+    <SolidColorBrush x:Key="heat-red-bg" Color="#3B2422" />
     <SolidColorBrush x:Key="overlay-shadow" Color="#000000" />
     <!-- 深色主题浮层阴影更重 -->
     <DropShadowEffect x:Key="OverlayShadow" Color="#000000" BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.40" />

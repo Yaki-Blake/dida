@@ -28,6 +28,9 @@ public partial class MainWindow : Window
     /// <summary>当前真正生效的快捷键文本，取消录制时用它恢复显示。</summary>
     private string _hotkeyText = HotkeyService.Default;
 
+    /// <summary>关掉之前用的组合，设置里点「开启」时原样恢复。</summary>
+    private string _hotkeyBeforeOff = HotkeyService.Default;
+
     /// <summary>按快捷键时窗口是否本来就在最前面（决定松手要不要收起）。</summary>
     private bool _hotkeyWindowWasActive;
 
@@ -48,6 +51,7 @@ public partial class MainWindow : Window
     private MonthView? _monthView;
     private YearView? _yearView;
     private FocusView? _focusView;
+    private ScheduleView? _scheduleView;
 
     /// <summary>绿色小圆点的直径（逻辑像素）。</summary>
     private const double SegmentDotSize = 8;
@@ -55,18 +59,25 @@ public partial class MainWindow : Window
     /// <summary>头部左侧标题与右侧按钮组之间至少留的空隙。</summary>
     private const double HeaderGap = 16;
 
-    /// <summary>侧栏与主区之间那条拖动条的宽度。</summary>
-    private const double SidebarSplitterWidth = 5;
+    /// <summary>侧栏与主区之间那条拖动条的命中区宽度（视觉线仍是 2px）。</summary>
+    private const double SidebarSplitterWidth = 10;
 
     /// <summary>已经排了一次宽度重算，避免同一轮布局里反复排队。</summary>
     private bool _columnLimitPending;
 
-    /// <summary>本次拖动中侧栏的目标宽度，按增量累加后夹在允许范围内。</summary>
-    private double _sidebarDragWidth;
+    /// <summary>
+    /// 侧栏「想要」的宽度：默认值来自 Tokens，用户拖动时更新。
+    /// 显示宽度只在窗口放不下时临时压缩，空间回来就恢复到这个值。
+    /// </summary>
+    private double _sidebarDesiredWidth;
 
     public MainWindow()
     {
         InitializeComponent();
+
+        // 侧栏默认宽度来自 Tokens（SidebarColumnWidth）；记下这个「想要的值」，
+        // 之后只在窗口放不下时临时压缩，不会再把它永久改小
+        _sidebarDesiredWidth = SidebarColumn.Width.Value;
 
         // .env 先读进来：同步客户端和同步服务都要用
         EnvFile.Load();
@@ -92,6 +103,7 @@ public partial class MainWindow : Window
 
         Loaded += OnLoaded;
         Closing += OnClosing;
+        StateChanged += OnStateChanged;
         PreviewKeyDown += OnPreviewKeyDown;
 
         // 窗口变窄或右侧详情打开后，已拖宽的侧栏要收回，不能把主区挤没
@@ -177,69 +189,79 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 侧栏向右拖动的极限：主区至少要放得下「标题 + 副标题」和右侧按钮组，中间留 HeaderGap。
-    /// 这行副标题会随日期与未完成数变化，所以宽度是动态的，每次头部尺寸变化都重算。
+    /// 主区最小宽度：侧栏优先。先让侧栏拿到想要的宽度，剩下的给主区；
+    /// 主区放不下完整头部时，头部靠副标题省略号让位，最多压到 <see cref="HeaderWidthPolicy.HeaderTrimFloor"/>。
+    /// 头部宽度会随标题、副标题、按钮显隐变化，所以每次头部尺寸变化都重算。
     /// </summary>
     private void UpdateMainColumnMinWidth()
     {
         if (MainColumn is null || HeaderBar is null || HeaderLeft is null || HeaderRight is null) return;
 
+        var rootWidth = RootGrid?.ActualWidth ?? ActualWidth;
+
+        // 首帧还没量出真实宽度（0 或极小）时就别算：这时可用宽度是负数，
+        // 一算就会把主区下限顶到上限、侧栏被永久按到 180，窗口再宽也回不来
+        if (!HeaderWidthPolicy.IsMeasured(rootWidth, MinWidth)) return;
+
         var margin = HeaderBar.Margin;
-        var target = Math.Ceiling(
+        var headerNeed = Math.Ceiling(
             MeasureContentWidth(HeaderLeft) + HeaderGap + MeasureContentWidth(HeaderRight)
             + margin.Left + margin.Right);
 
-        // 360 是原有下限，取两者较大值
-        if (target < 360) target = 360;
-
-        // 窗口不够宽时（比如详情面板打开、侧栏已在最小宽度）主区拿不到这么多，
-        // 再强求就会整列溢出、把详情面板挤出窗口，这里按当前可用空间封顶
-        var detail = DetailPanel is { Visibility: Visibility.Visible } ? DetailPanel.Width : 0;
-        var available = (RootGrid?.ActualWidth ?? ActualWidth) - SidebarColumn.MinWidth - SidebarSplitterWidth - detail;
-        if (target > available) target = Math.Max(360, available);
+        var available = rootWidth - SidebarSplitterWidth - DetailWidth;
+        var target = HeaderWidthPolicy.MainMinWidth(available, headerNeed, _sidebarDesiredWidth);
 
         if (Math.Abs(MainColumn.MinWidth - target) >= 0.5) MainColumn.MinWidth = target;
 
-        // 副标题变长后极限变小，已拖开的侧栏要跟着收回
         ClampSidebarWidth();
     }
 
+    /// <summary>右侧详情面板占的宽度（没显示时为 0）。</summary>
+    private double DetailWidth
+        => DetailPanel is { Visibility: Visibility.Visible } ? DetailPanel.Width : 0;
+
     private void SidebarSplitter_DragStarted(object sender, DragStartedEventArgs e)
-        => _sidebarDragWidth = SidebarColumn.ActualWidth;
+        => _sidebarDesiredWidth = SidebarColumn.ActualWidth;
 
     private void SidebarSplitter_DragDelta(object sender, DragDeltaEventArgs e)
     {
-        _sidebarDragWidth += e.HorizontalChange;
-
         var min = SidebarColumn.MinWidth;
         var max = GetSidebarMaxWidth();
-        _sidebarDragWidth = Math.Max(min, Math.Min(max, _sidebarDragWidth));
 
-        if (Math.Abs(SidebarColumn.Width.Value - _sidebarDragWidth) < 0.01) return;
-        SidebarColumn.Width = new GridLength(_sidebarDragWidth);
+        // 拖动改的是「想要的宽度」，窗口再窄也不会把这个值抹掉
+        _sidebarDesiredWidth = HeaderWidthPolicy.Clamp(_sidebarDesiredWidth + e.HorizontalChange, min, max);
+
+        if (Math.Abs(SidebarColumn.Width.Value - _sidebarDesiredWidth) >= 0.01)
+            SidebarColumn.Width = new GridLength(_sidebarDesiredWidth);
+
+        // 侧栏变宽后主区要相应收窄，头部跟着走省略号
+        ScheduleColumnLimitUpdate();
     }
 
     /// <summary>
-    /// 侧栏能拖到的最大宽度：主区至少要留下头部文字需要的最小宽度；
+    /// 侧栏能拖到的最大宽度：主区留够它压缩后的下限；
     /// 右侧详情面板可见时还要再让出它的宽度。
     /// </summary>
     private double GetSidebarMaxWidth()
     {
         if (RootGrid is null) return SidebarColumn.MinWidth;
 
-        var detail = DetailPanel is { Visibility: Visibility.Visible } ? DetailPanel.Width : 0;
-        var max = RootGrid.ActualWidth - SidebarSplitterWidth - MainColumn.MinWidth - detail;
-        return Math.Max(SidebarColumn.MinWidth, max);
+        var available = RootGrid.ActualWidth - SidebarSplitterWidth - DetailWidth;
+        return HeaderWidthPolicy.SidebarMaxWidth(available, SidebarColumn.MinWidth);
     }
 
-    /// <summary>窗口变窄、详情打开或副标题变长时，把过宽的侧栏收回到允许范围。</summary>
+    /// <summary>
+    /// 窗口变窄、详情打开时只压缩显示宽度；空间回来后恢复到用户想要的宽度。
+    /// </summary>
     private void ClampSidebarWidth()
     {
         if (SidebarColumn is null) return;
 
-        var current = SidebarColumn.ActualWidth;
-        var width = Math.Max(SidebarColumn.MinWidth, Math.Min(GetSidebarMaxWidth(), current));
-        if (Math.Abs(current - width) < 0.5) return;
+        var rootWidth = RootGrid?.ActualWidth ?? ActualWidth;
+        if (!HeaderWidthPolicy.IsMeasured(rootWidth, MinWidth)) return;
+
+        var width = HeaderWidthPolicy.Clamp(_sidebarDesiredWidth, SidebarColumn.MinWidth, GetSidebarMaxWidth());
+        if (Math.Abs(SidebarColumn.Width.Value - width) < 0.5) return;
 
         SidebarColumn.Width = new GridLength(width);
     }
@@ -253,35 +275,65 @@ public partial class MainWindow : Window
         return width;
     }
 
-    /// <summary>把主界面叫到前台：全局快捷键、托盘双击、重复启动都走这一处。</summary>
-    public void RestoreToFront()
+    /// <summary>
+    /// 把主界面叫到前台：全局快捷键、托盘双击、重复启动都走这一处。
+    /// 不能只用 Activate()——从托盘或第二次启动叫回来时进程没有前台权限，窗口只会闪一下。
+    /// </summary>
+    public void RestoreToFront() => WindowFront.BringToFront(this);
+
+    /// <summary>最小化直接收进托盘：任务栏不留图标，只能从托盘或快捷键叫回来。</summary>
+    private void OnStateChanged(object? sender, EventArgs e)
     {
-        Show();
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-        Activate();
+        if (WindowState == WindowState.Minimized) Hide();
     }
 
-    /// <summary>按下快捷键：不在最前面就先叫到前台，松手时再决定是留是收。</summary>
+    /// <summary>
+    /// 按下快捷键：本来就在前台就直接收起，不等松手；
+    /// 收在托盘里则先叫到前台，松手时再按长短按决定是留是收。
+    /// </summary>
     private void OnHotkeyPressed()
     {
-        _hotkeyWindowWasActive = IsActive && WindowState == WindowState.Normal;
-        if (!_hotkeyWindowWasActive) RestoreToFront();
+        // 收在托盘里时 IsActive 可能还留着 true，必须连可见性一起判断
+        _hotkeyWindowWasActive = IsVisible && IsActive && WindowState == WindowState.Normal;
+
+        if (_hotkeyWindowWasActive)
+        {
+            // 等松手才收的话，按住 Alt 的那几百毫秒窗口一动不动，手感就是「按了没反应」
+            Hide();
+            return;
+        }
+
+        RestoreToFront();
     }
 
-    /// <summary>松开快捷键：长按是「按住看一眼」，松手收回；短按在前台则收起，否则保持打开。</summary>
+    /// <summary>松开快捷键：长按是「按住看一眼」，松手收回；窗口本来就是打开的不再重复收起。</summary>
     private void OnHotkeyReleased(bool longHold)
     {
-        if (longHold || _hotkeyWindowWasActive) WindowState = WindowState.Minimized;
+        if (!_hotkeyWindowWasActive && longHold) Hide();
     }
 
-    /// <summary>启动时读回上次设的快捷键；没设过或存坏了就注册默认的 Alt+D。</summary>
+    /// <summary>启动时读回上次设的快捷键；关掉过就保持关闭，没设过或存坏了用默认的 Alt+D。</summary>
     private void ApplySavedHotkey()
     {
-        if (!HotkeyService.TryParse(_store.GetMeta("hotkey"), out var modifiers, out var key))
+        var saved = _store.GetMeta("hotkey");
+
+        // 在设置里点过「关闭」：这次启动也不注册，界面照实显示「已关闭」
+        if (HotkeyService.IsOff(saved))
+        {
+            _hotkey?.Disable();
+            _hotkeyText = HotkeyService.Disabled;
+            _vm.HotkeyText = _hotkeyText;
+            _vm.IsHotkeyOff = true;
+            return;
+        }
+
+        if (!HotkeyService.TryParse(saved, out var modifiers, out var key))
             HotkeyService.TryParse(HotkeyService.Default, out modifiers, out key);
 
         _hotkeyText = HotkeyService.Format(modifiers, key);
+        _hotkeyBeforeOff = _hotkeyText;
         _vm.HotkeyText = _hotkeyText;
+        _vm.IsHotkeyOff = false;
         _hotkey?.Apply(modifiers, key);
     }
 
@@ -291,7 +343,39 @@ public partial class MainWindow : Window
         if (_hotkey is null || !_hotkey.Apply(modifiers, key)) return false;
 
         _hotkeyText = HotkeyService.Format(modifiers, key);
+        _hotkeyBeforeOff = _hotkeyText;
         _vm.HotkeyText = _hotkeyText;
+        _vm.IsHotkeyOff = false;
+        _store.SetMeta("hotkey", _hotkeyText);
+        return true;
+    }
+
+    /// <summary>
+    /// 设置里的「关闭 / 开启」：关闭时注销热键并把「off」写进 meta，
+    /// 下次启动也保持关闭；开启时按关闭前的组合重新注册，失败就维持关闭。
+    /// </summary>
+    private bool SetHotkeyEnabled(bool enabled)
+    {
+        if (!enabled)
+        {
+            // 只有本来是开着的才记下组合，避免连点两次把「已关闭」记进去
+            if (!_vm.IsHotkeyOff) _hotkeyBeforeOff = _hotkeyText;
+
+            _hotkey?.Disable();
+            _hotkeyText = HotkeyService.Disabled;
+            _vm.HotkeyText = _hotkeyText;
+            _vm.IsHotkeyOff = true;
+            _store.SetMeta("hotkey", HotkeyService.OffMarker);
+            return true;
+        }
+
+        if (_hotkey is null) return false;
+        if (!HotkeyService.TryParse(_hotkeyBeforeOff, out var modifiers, out var key)) return false;
+        if (!_hotkey.Apply(modifiers, key)) return false;
+
+        _hotkeyText = HotkeyService.Format(modifiers, key);
+        _vm.HotkeyText = _hotkeyText;
+        _vm.IsHotkeyOff = false;
         _store.SetMeta("hotkey", _hotkeyText);
         return true;
     }
@@ -306,6 +390,18 @@ public partial class MainWindow : Window
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e) => ShowSettings();
 
+    /// <summary>
+    /// 点日视图课程带上的课：跳到课表页，把那一周那一天和这门课的详情一起带过去。
+    /// </summary>
+    private void DayCourse_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: DayCourseBlockViewModel block }) return;
+
+        _vm.Schedule.FocusCourse(block.Course);
+        _vm.Mode = ViewMode.Schedule;
+        e.Handled = true;
+    }
+
     /// <summary>同步时发现没设账号：直接弹设置，用户不用自己去找入口。</summary>
     private void OnAccountRequired() => Dispatcher.BeginInvoke(ShowSettings);
 
@@ -317,7 +413,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settings = new SettingsWindow(_vm, TryApplyHotkey, SaveServerAddress) { Owner = this };
+        _settings = new SettingsWindow(_vm, TryApplyHotkey, SetHotkeyEnabled, SaveServerAddress) { Owner = this };
         _settings.Closed += (_, _) => _settings = null;
         _settings.ShowDialog();
     }
@@ -390,6 +486,11 @@ public partial class MainWindow : Window
 
             case nameof(MainViewModel.IsFocusView) when _vm.IsFocusView:
                 EnsureView(ref _focusView, FocusHost, () => new FocusView());
+                break;
+
+            case nameof(MainViewModel.IsScheduleView) when _vm.IsScheduleView:
+                EnsureView(ref _scheduleView, ScheduleHost,
+                    () => new ScheduleView { DataContext = _vm.Schedule });
                 break;
         }
     }
@@ -696,7 +797,7 @@ public partial class MainWindow : Window
     /// <summary>主面板：上下移动选中行、Enter 完成、Delete 请求删除。</summary>
     private void HandleMainKeys(KeyEventArgs e)
     {
-        if (_vm.Mode is ViewMode.Month or ViewMode.Year or ViewMode.Focus) return;
+        if (_vm.Mode is ViewMode.Month or ViewMode.Year or ViewMode.Focus or ViewMode.Schedule) return;
 
         if (e.Key is Key.Up or Key.W)
         {
@@ -808,6 +909,7 @@ public partial class MainWindow : Window
             "month" => ViewMode.Month,
             "year" => ViewMode.Year,
             "focus" => ViewMode.Focus,
+            "schedule" => ViewMode.Schedule,
             _ => ViewMode.Day
         };
 
@@ -845,6 +947,9 @@ public partial class MainWindow : Window
                     break;
                 case ViewMode.Focus:
                     _vm.ShowFocusSegmentCommand.Execute(null);
+                    break;
+                case ViewMode.Schedule:
+                    _vm.ShowScheduleSegmentCommand.Execute(null);
                     break;
                 default:
                     _vm.ShowDaySegmentCommand.Execute(null);
@@ -940,6 +1045,8 @@ public partial class MainWindow : Window
     /// <summary>分段顺序，用于决定翻页方向。</summary>
     private static int SegmentIndex(ViewMode mode) => mode switch
     {
+        // 课表按钮排在「日」左边，索引取 -1 才能让翻页方向正确
+        ViewMode.Schedule => -1,
         ViewMode.Week => 1,
         ViewMode.Month => 2,
         ViewMode.Year => 3,
@@ -971,6 +1078,7 @@ public partial class MainWindow : Window
 
     private Button CurrentSegmentButton() => _vm.Mode switch
     {
+        ViewMode.Schedule => ScheduleSegmentButton,
         ViewMode.Week => WeekSegmentButton,
         ViewMode.Month => MonthSegmentButton,
         ViewMode.Year => YearSegmentButton,

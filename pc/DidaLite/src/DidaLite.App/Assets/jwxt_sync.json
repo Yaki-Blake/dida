@@ -1,0 +1,8 @@
+{
+  "baseUrl": "http://jwxt.gdufe.edu.cn/jsxsd/",
+  "kbPath": "/jsxsd/xskb/xskb_list.do",
+  "kbUrl": "http://jwxt.gdufe.edu.cn/jsxsd/xskb/xskb_list.do",
+  "helperPort": 5080,
+  "browserWaitSeconds": 300,
+  "exclude": ""
+}

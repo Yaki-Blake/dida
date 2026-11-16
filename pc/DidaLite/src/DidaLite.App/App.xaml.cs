@@ -1,3 +1,4 @@
+using System.Threading;
 using System.Windows;
 using DidaLite.App.Services;
 using DidaLite.App.Views;
@@ -14,7 +15,13 @@ public partial class App : Application
         // 不必再走一遍建窗、读库、布局。
         if (!SingleInstance.TryTake())
         {
+            // 刚被双击启动的这份手里有前台权限，先让给整个会话，
+            // 已在运行的那份才有资格把窗口真正提到最前，而不是只在任务栏闪
+            WindowFront.YieldForegroundRight();
             SingleInstance.WakeExisting();
+
+            // 这一份马上要退出，稍等一瞬，让已有实例在权限还有效时完成置前
+            Thread.Sleep(60);
             Shutdown(0);
             return;
         }
@@ -30,6 +37,17 @@ public partial class App : Application
         else
         {
             window.Show();
+
+            // 正常双击启动时系统会把窗口放到前台，但被启动器/安全软件接手时会掉到后面，
+            // 这里补一次前置，用户双击就一定能看到窗口
+            WindowFront.BringToFront(window);
+
+            // 冷启动要等首帧渲染，上面那次置前可能落在窗口还不可见的时刻；
+            // 内容真正画出来后再补一次，确保窗口是「看得见且在最前」
+            window.ContentRendered += (_, _) =>
+            {
+                if (window.IsVisible) WindowFront.BringToFront(window);
+            };
         }
 
         SingleInstance.Listen(BringToFront);

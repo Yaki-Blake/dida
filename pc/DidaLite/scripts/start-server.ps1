@@ -1,4 +1,4 @@
-﻿﻿# 滴答：拉起本地同步服务并给出手机可用的地址
+﻿﻿﻿# 滴答：拉起本地同步服务并给出手机可用的地址
 # 用法（在 PowerShell 里）：右键“使用 PowerShell 运行”，或执行
 #   powershell -ExecutionPolicy Bypass -File scripts\start-server.ps1
 param([int]$Port = 5080)

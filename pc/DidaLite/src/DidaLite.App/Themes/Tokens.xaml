@@ -34,9 +34,9 @@
     <sys:Double x:Key="RowHeight">44</sys:Double>
     <!-- 日程列表一行：五栏信息横排，行高比地址栏等普通行更紧凑 -->
     <sys:Double x:Key="RowHeightCompact">32</sys:Double>
-    <sys:Double x:Key="SidebarWidth">272</sys:Double>
+    <sys:Double x:Key="SidebarWidth">278</sys:Double>
     <!-- 列宽只认 GridLength，不能直接拿上面的 Double -->
-    <GridLength x:Key="SidebarColumnWidth">272</GridLength>
+    <GridLength x:Key="SidebarColumnWidth">278</GridLength>
     <sys:Double x:Key="DetailWidth">300</sys:Double>
     <sys:Double x:Key="HeaderHeight">56</sys:Double>
     <sys:Double x:Key="CalendarCell">34</sys:Double>

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>课表 · DidaLite 分段原型</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f7f9; --panel: #ffffff; --line: #e5e7eb; --line-soft: #f0f1f3;
+    --ink: #1f2937; --ink-2: #4b5563; --ink-3: #9ca3af;
+    --brand: #2563eb; --brand-soft: #eff6ff; --today: #fff7ed;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .app { display: flex; min-height: 100vh; }
+
+  /* ---- 左侧分段栏：对应 MainWindow 的 Segment 导航 ---- */
+  .side { width: 96px; flex: none; background: #fbfcfd; border-right: 1px solid var(--line);
+          padding: 18px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .logo { font-size: 15px; font-weight: 700; text-align: center; padding: 4px 0 16px;
+          color: var(--brand); letter-spacing: 1px; }
+  .seg { display: flex; flex-direction: column; align-items: center; gap: 3px;
+         padding: 9px 4px; border-radius: 9px; border: 1px solid transparent;
+         color: var(--ink-2); cursor: pointer; user-select: none; font-size: 12px; }
+  .seg:hover { background: #f1f5f9; }
+  .seg.on { background: var(--brand-soft); border-color: #bfdbfe; color: var(--brand); font-weight: 600; }
+  .seg .ico { font-size: 17px; line-height: 1.2; }
+  .side .tip { margin-top: auto; font-size: 11px; color: var(--ink-3); text-align: center; line-height: 1.5; }
+
+  /* ---- 主区 ---- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .top { background: var(--panel); border-bottom: 1px solid var(--line);
+         padding: 16px 22px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .title { font-size: 19px; font-weight: 650; margin: 0 4px 0 0; }
+  .term { color: var(--ink-3); font-size: 12px; }
+  .spacer { flex: 1; }
+  .weeknav { display: flex; align-items: center; gap: 6px; }
+  button, select { font: inherit; color: var(--ink); background: #fff;
+                   border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; cursor: pointer; }
+  button:hover, select:hover { background: #f8fafc; }
+  button.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  button.primary:hover { background: #1d4ed8; }
+  .tabs { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .tabs button { border: 0; border-radius: 0; padding: 6px 13px; }
+  .tabs button.on { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+
+  .content { padding: 18px 22px 26px; overflow: auto; }
+  .summary { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink-2); font-size: 13px; margin-bottom: 14px; }
+  .summary b { color: var(--ink); font-weight: 650; }
+
+  /* ---- 周视图网格 ---- */
+  .grid-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+               overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.03); min-width: 880px; }
+  .grid { display: grid; grid-template-columns: 76px repeat(7, minmax(118px, 1fr)); }
+  .gh { background: #fafbfc; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line-soft);
+        padding: 9px 8px; text-align: center; font-size: 12px; color: var(--ink-2); font-weight: 600; }
+  .gh.today { background: var(--today); color: #c2410c; }
+  .gh .d { display: block; font-size: 11px; font-weight: 400; color: var(--ink-3); margin-top: 1px; }
+  .slot-label { background: #fafbfc; border-bottom: 1px solid var(--line-soft);
+                border-right: 1px solid var(--line); padding: 8px 6px; text-align: center;
+                font-size: 11px; color: var(--ink-3); display: flex; flex-direction: column;
+                align-items: center; justify-content: center; gap: 2px; }
+  .slot-label b { color: var(--ink-2); font-size: 12px; font-weight: 600; }
+  .cell { min-height: 92px; border-bottom: 1px solid var(--line-soft);
+          border-right: 1px solid var(--line-soft); padding: 6px; display: flex;
+          flex-direction: column; gap: 5px; }
+  .cell.today { background: #fffcf7; }
+  .card { border-radius: 7px; border-left: 3px solid var(--c, #94a3b8);
+          background: var(--bg-soft, #f1f5f9); padding: 6px 8px; font-size: 12px; line-height: 1.4; }
+  .card .n { font-weight: 650; font-size: 12.5px; display: block; }
+  .card .r { color: var(--ink-2); display: block; margin-top: 2px; }
+  .card .t { color: var(--ink-3); font-size: 11px; display: block; margin-top: 2px; }
+
+  /* ---- 日视图 ---- */
+  .daywrap { max-width: 720px; }
+  .days { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .days button.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 8px 16px 16px; }
+  .item { display: grid; grid-template-columns: 108px 1fr; gap: 14px; padding: 13px 0;
+          border-bottom: 1px solid var(--line-soft); }
+  .item:last-child { border-bottom: 0; }
+  .time { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 3px; }
+  .time b { display: block; color: var(--ink); font-size: 15px; }
+  .bar { border-left: 3px solid var(--c, #94a3b8); border-radius: 6px;
+         background: var(--bg-soft, #f1f5f9); padding: 9px 12px; }
+  .bar .n { font-weight: 650; }
+  .bar .m { color: var(--ink-2); font-size: 12px; margin-top: 3px; }
+  .empty { color: var(--ink-3); padding: 28px 4px; text-align: center; }
+
+  /* ---- 接口契约 ---- */
+  details { margin-top: 22px; background: var(--panel); border: 1px solid var(--line);
+            border-radius: 10px; padding: 12px 16px; max-width: 900px; }
+  summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  details code { font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+                 background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+  details ul { margin: 10px 0 2px; padding-left: 20px; font-size: 12.5px; color: var(--ink-2); }
+  details li { margin: 4px 0; }
+  .foot { color: var(--ink-3); font-size: 11.5px; margin-top: 16px; line-height: 1.7; }
+  .err { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+         padding: 12px 16px; border-radius: 9px; font-size: 13px; }
+</style>
+<script>/*__SCHEDULE_SNAPSHOT__*/</script>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="logo">滴答</div>
+    <div class="seg" data-seg="day"><span class="ico">☀</span>日</div>
+    <div class="seg" data-seg="week"><span class="ico">▦</span>周</div>
+    <div class="seg" data-seg="month"><span class="ico">▤</span>月</div>
+    <div class="seg" data-seg="year"><span class="ico">◫</span>年</div>
+    <div class="seg" data-seg="focus"><span class="ico">◎</span>专注</div>
+    <div class="seg on" data-seg="schedule"><span class="ico">▩</span>课表</div>
+    <div class="tip">新增分段<br>原型预览</div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <h1 class="title">课表</h1>
+      <span class="term" id="term">2026-2027-1 · 第 1 周周一 2026-09-07</span>
+      <span class="spacer"></span>
+      <div class="weeknav">
+        <button id="prev">‹ 上周</button>
+        <select id="weekSel" aria-label="选择教学周"></select>
+        <button id="next">下周 ›</button>
+        <button id="thisWeek">本周</button>
+      </div>
+      <div class="tabs">
+        <button id="tabWeek" class="on">周视图</button>
+        <button id="tabDay">日视图</button>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="summary" id="summary"></div>
+      <div id="view"></div>
+
+      <details>
+        <summary>接口契约（供 DidaLite WPF 端对接）</summary>
+        <ul>
+          <li><code>GET /api/health</code> — 健康检查，返回事件总数、学期、第 1 周周一</li>
+          <li><code>GET /api/schedule</code> — 全部事件；支持 <code>?date=</code>、<code>?from=&amp;to=</code>、<code>?week=</code>、<code>?weekday=</code></li>
+          <li><code>GET /api/schedule/today</code> — 今天（北京时间）的课程 + 当前教学周</li>
+          <li><code>GET /api/schedule/week?week=11</code> — 指定教学周</li>
+          <li><code>GET /api/courses</code> — 课程汇总（名称 / 事件数 / 教室 / 教师）</li>
+          <li><code>GET /schedule.ics</code> — 原始 ICS，可直接作为日历订阅源</li>
+        </ul>
+        <div style="font-size:12.5px;color:#4b5563;margin-top:8px">
+          单个事件字段：<code>uid, date, week, weekday, start, end, startUTC, endUTC, name, room, teacher, weeksExpr, period, slot</code>。
+          所有本地时间均为 UTC+8；<code>slot</code> 取值 1–6，对应 1-2 / 3-4 / 5-6 / 7-8 / 9-10 / 11-12 节。
+        </div>
+      </details>
+
+      <p class="foot">
+        数据来源：<span id="src">课表_2026-2027-1.ics</span> · 与浏览器书签 / Python 脚本生成的 ICS 为同一份产物。<br>
+        本页是<strong>接口 + 页面原型</strong>，尚未嵌入 DidaLite 客户端；真正把「课表」分段放进桌面端需要
+        <code>MainWindow.xaml</code> 与 <code>MainViewModel</code> 源码并重新发布。原型刻意复刻了左侧分段栏的位置与交互。
+      </p>
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var S = { events: [], week: 11, view: 'week', day: 1, today: '', week1: '2026-09-07',
+            total: 0, src: '', mode: '实时接口' };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function hue(s) {
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
+  function colorOf(name) {
+    var h = hue(name || 'x');
+    return 'background:hsl(' + h + ' 62% 96%);--c:hsl(' + h + ' 48% 52%)';
+  }
+  function addDays(iso, n) {
+    var p = iso.split('-').map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2] + n));
+    return d.toISOString().slice(0, 10);
+  }
+  function weekMonday(w) { return addDays(S.week1, (w - 1) * 7); }
+  function currentWeek() {
+    var t = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    var p = S.week1.split('-').map(Number), q = t.split('-').map(Number);
+    var days = Math.floor((Date.UTC(q[0], q[1] - 1, q[2]) - Date.UTC(p[0], p[1] - 1, p[2])) / 86400000);
+    return { week: Math.floor(days / 7) + 1, today: t };
+  }
+
+  var SLOT_LABEL = [
+    ['1-2 节', '08:30'], ['3-4 节', '10:20'], ['5-6 节', '14:00'],
+    ['7-8 节', '15:50'], ['9-10 节', '18:30'], ['11-12 节', '20:20']
+  ];
+  var WD = ['一', '二', '三', '四', '五', '六', '日'];
+
+  function renderSummary(weekEvents) {
+    var names = {}, rooms = {};
+    weekEvents.forEach(function (e) { names[e.name] = 1; rooms[e.room] = 1; });
+    document.getElementById('summary').innerHTML =
+      '第 <b>' + S.week + '</b> 教学周（' + weekMonday(S.week) + ' 起） · 本周 <b>' + weekEvents.length +
+      '</b> 节课 · <b>' + Object.keys(names).length + '</b> 门课 · <b>' + Object.keys(rooms).length +
+      '</b> 个教室 · 全学期共 <b>' + S.total + '</b> 个事件 · 数据模式 <b>' + esc(S.mode) + '</b>';
+  }
+
+  function renderWeek() {
+    var mon = weekMonday(S.week);
+    var weekEvents = S.events.filter(function (e) { return e.week === S.week; });
+    renderSummary(weekEvents);
+    var todayIso = S.today;
+    var html = '<div class="grid-wrap"><div class="grid">';
+    html += '<div class="gh">节次</div>';
+    for (var d = 0; d < 7; d++) {
+      var iso = addDays(mon, d);
+      html += '<div class="gh' + (iso === todayIso ? ' today' : '') + '">星期' + WD[d] +
+              '<span class="d">' + iso.slice(5) + (iso === todayIso ? ' · 今天' : '') + '</span></div>';
+    }
+    for (var slot = 1; slot <= 6; slot++) {
+      html += '<div class="slot-label"><b>' + SLOT_LABEL[slot - 1][0] + '</b><span>' + SLOT_LABEL[slot - 1][1] + '</span></div>';
+      for (var wd = 1; wd <= 7; wd++) {
+        var cellIso = addDays(mon, wd - 1);
+        var list = weekEvents.filter(function (e) { return e.slot === slot && e.weekday === wd; });
+        html += '<div class="cell' + (cellIso === todayIso ? ' today' : '') + '">';
+        list.forEach(function (e) {
+          html += '<div class="card" style="' + colorOf(e.name) + '">' +
+                  '<span class="n">' + esc(e.name) + '</span>' +
+                  '<span class="r">' + esc(e.room) + '</span>' +
+                  '<span class="t">' + esc(e.start) + '–' + esc(e.end) +
+                  (e.teacher ? ' · ' + esc(e.teacher) : '') + '</span></div>';
+        });
+        html += '</div>';
+      }
+    }
+    html += '</div></div>';
+    document.getElementById('view').innerHTML = html;
+  }
+
+  function renderDay() {
+    var mon = weekMonday(S.week);
+    var weekEvents = S.events.filter(function (e) { return e.week === S.week; });
+    renderSummary(weekEvents);
+    var iso = addDays(mon, S.day - 1);
+    var list = weekEvents.filter(function (e) { return e.weekday === S.day; });
+    var html = '<div class="daywrap"><div class="days">';
+    for (var d = 1; d <= 7; d++) {
+      html += '<button data-day="' + d + '" class="' + (d === S.day ? 'on' : '') + '">周' + WD[d - 1] +
+              ' <span style="opacity:.65;font-size:11px">' + addDays(mon, d - 1).slice(5) + '</span></button>';
+    }
+    html += '</div><div class="timeline">';
+    if (!list.length) html += '<div class="empty">这一天没有课</div>';
+    list.forEach(function (e) {
+      html += '<div class="item"><div class="time"><b>' + esc(e.start) + '</b>' + esc(e.end) +
+              ' · ' + esc(e.period) + ' 节</div>' +
+              '<div class="bar" style="' + colorOf(e.name) + '">' +
+              '<div class="n">' + esc(e.name) + '</div>' +
+              '<div class="m">' + esc(e.room) + (e.teacher ? ' · ' + esc(e.teacher) : '') +
+              ' · 第 ' + e.week + ' 教学周 · 周次 ' + esc(e.weeksExpr) + '</div></div></div>';
+    });
+    html += '</div></div>';
+    document.getElementById('view').innerHTML = html;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-day]'), function (b) {
+      b.onclick = function () { S.day = +b.dataset.day; renderDay(); };
+    });
+  }
+
+  function render() { S.view === 'week' ? renderWeek() : renderDay(); }
+
+  function initControls() {
+    var sel = document.getElementById('weekSel');
+    for (var w = 1; w <= 20; w++) {
+      var o = document.createElement('option');
+      o.value = w; o.textContent = '第 ' + w + ' 周';
+      sel.appendChild(o);
+    }
+    sel.value = S.week;
+    sel.onchange = function () { S.week = +sel.value; render(); };
+    document.getElementById('prev').onclick = function () { S.week = Math.max(1, S.week - 1); sel.value = S.week; render(); };
+    document.getElementById('next').onclick = function () { S.week = Math.min(20, S.week + 1); sel.value = S.week; render(); };
+    document.getElementById('thisWeek').onclick = function () { S.week = currentWeek().week; sel.value = S.week; render(); };
+    document.getElementById('tabWeek').onclick = function () {
+      S.view = 'week'; this.classList.add('on'); document.getElementById('tabDay').classList.remove('on'); render();
+    };
+    document.getElementById('tabDay').onclick = function () {
+      S.view = 'day'; this.classList.add('on'); document.getElementById('tabWeek').classList.remove('on'); render();
+    };
+    Array.prototype.forEach.call(document.querySelectorAll('.seg'), function (el) {
+      if (el.dataset.seg === 'schedule') return;
+      el.onclick = function () {
+        var t = document.getElementById('toast');
+        if (t) t.remove();
+        var n = document.createElement('div');
+        n.id = 'toast';
+        n.textContent = '「' + el.textContent.trim() + '」视图由 DidaLite 本体提供，此原型只实现新增的「课表」分段';
+        n.setAttribute('style', 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
+          'background:#1f2937;color:#fff;padding:9px 16px;border-radius:8px;font-size:13px;z-index:99;' +
+          'box-shadow:0 6px 20px rgba(0,0,0,.2)');
+        document.body.appendChild(n);
+        setTimeout(function () { if (n.parentNode) n.remove(); }, 3000);
+      };
+    });
+  }
+
+  function fail(msg) {
+    document.getElementById('view').innerHTML = '<div class="err"><b>无法读取课表数据</b><br>' + esc(msg) +
+      '<br><br>请通过接口服务打开本页：<code>http://127.0.0.1:5081/</code><br>' +
+      '启动命令：<code>python schedule_server.py</code>（在 dida-schedule 目录下）。</div>';
+  }
+
+  function boot(data, mode, subtitle) {
+    S.events = data.events || [];
+    S.total = data.total || S.events.length;
+    S.week1 = data.week1Monday || S.week1;
+    S.src = data.source || S.src;
+    S.mode = mode;
+    var cw = currentWeek();
+    S.today = cw.today;
+    S.week = Math.min(20, Math.max(1, cw.week));
+    S.day = ((new Date(Date.now() + 8 * 3600000).getUTCDay() + 6) % 7) + 1;
+    document.getElementById('term').textContent = data.term + ' · 第 1 周周一 ' + S.week1 + subtitle;
+    document.getElementById('src').textContent = S.src + (mode === '离线快照' ? '（schedule_data.js）' : '');
+    initControls();
+    document.getElementById('weekSel').value = S.week;
+    render();
+  }
+
+  // 通过接口服务打开 → 实时数据；通过 file:// 或静态预览打开 → 加载同目录离线快照
+  function offlineFallback() {
+    if (window.__SCHEDULE_DATA__) { boot(window.__SCHEDULE_DATA__, '内联快照', ' · 内联快照'); return; }
+    var s = document.createElement('script');
+    s.src = './schedule_data.js';
+    s.onload = function () {
+      if (window.__SCHEDULE_DATA__) boot(window.__SCHEDULE_DATA__, '离线快照', ' · 离线快照');
+      else fail('离线快照为空，请先运行 python export_snapshot.py');
+    };
+    s.onerror = function () {
+      fail('既无法访问接口服务，也找不到同目录的 schedule_data.js。' +
+           '请在 dida-schedule 目录运行 python schedule_server.py，或先运行 python export_snapshot.py。');
+    };
+    document.head.appendChild(s);
+  }
+
+  fetch('/api/schedule', { cache: 'no-store' })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (data) {
+      if (!data || !Array.isArray(data.events)) throw new Error('返回体不是课表数据');
+      boot(data, '实时接口', '');
+    })
+    .catch(function () { offlineFallback(); });
+})();
+</script>
+</body>
+</html>

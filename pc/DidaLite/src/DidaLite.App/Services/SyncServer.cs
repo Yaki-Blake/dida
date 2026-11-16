@@ -66,7 +66,10 @@ public sealed class SyncServer : IDisposable
             // 鉴权：本机请求直接放行（PC 自己就是服务端）；手机必须带登录换到的 token。
             app.Use(async (ctx, next) =>
             {
-                if (IsLoopback(ctx.Connection.RemoteIpAddress) || ctx.Request.Path == "/login")
+                // /api/health 不含数据，和 /login 一样免鉴权，便于外部探活
+                if (IsLoopback(ctx.Connection.RemoteIpAddress)
+                    || ctx.Request.Path == "/login"
+                    || ctx.Request.Path == "/api/health")
                 {
                     await next(ctx);
                     return;
@@ -85,6 +88,9 @@ public sealed class SyncServer : IDisposable
             app.MapPost("/login", LoginAsync);
             app.MapGet("/sync", (HttpContext ctx) => GetAsync(ctx));
             app.MapPost("/sync", (HttpContext ctx) => PostAsync(ctx));
+
+            // 课表：与 /sync 共用 5080，只读数据，不碰任务库
+            app.MapScheduleEndpoints();
 
             app.Start();
             _app = app;

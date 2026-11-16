@@ -115,20 +115,41 @@
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="快捷键" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="点一下再按下组合键，用来随时唤出主窗口；Esc 取消。"
+                        <TextBlock Text="点一下再按下组合键，用来随时唤出主窗口；Esc 取消。用不到时可以点右边「关闭」，下次启动也保持关闭。"
                                    Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,4,0,8" />
 
-                        <Button x:Name="HotkeyButton" Style="{StaticResource GhostButton}"
-                                HorizontalAlignment="Left" Click="HotkeyButton_Click"
-                                AutomationProperties.AutomationId="HotkeyButton"
-                                ToolTip="点击后按下想用的组合键，Esc 取消">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="唤起快捷键" VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding HotkeyText}" Margin="8,0,0,0" VerticalAlignment="Center"
-                                           Foreground="{DynamicResource text-secondary}"
-                                           AutomationProperties.AutomationId="HotkeyValue" />
-                            </StackPanel>
-                        </Button>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="HotkeyButton" Style="{StaticResource GhostButton}"
+                                    Click="HotkeyButton_Click"
+                                    AutomationProperties.AutomationId="HotkeyButton"
+                                    ToolTip="点击后按下想用的组合键，Esc 取消">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="唤起快捷键" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding HotkeyText}" Margin="8,0,0,0" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource text-secondary}"
+                                               AutomationProperties.AutomationId="HotkeyValue" />
+                                </StackPanel>
+                            </Button>
+
+                            <!-- 开着的时候显示「关闭」，关掉之后变成「开启」，点一下按原组合恢复 -->
+                            <Button x:Name="HotkeyToggleButton"
+                                    Click="HotkeyToggle_Click"
+                                    Margin="14,0,0,0"
+                                    AutomationProperties.AutomationId="HotkeyToggleButton">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
+                                        <Setter Property="Content" Value="关闭" />
+                                        <Setter Property="ToolTip" Value="关掉全局快捷键，不再响应 Alt+D 之类的组合" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsHotkeyOff}" Value="True">
+                                                <Setter Property="Content" Value="开启" />
+                                                <Setter Property="ToolTip" Value="按关闭前的组合重新启用快捷键" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 

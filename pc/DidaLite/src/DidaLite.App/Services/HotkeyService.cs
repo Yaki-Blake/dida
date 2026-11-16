@@ -13,6 +13,12 @@ public sealed class HotkeyService : IDisposable
     /// <summary>默认快捷键。</summary>
     public const string Default = "Alt+D";
 
+    /// <summary>设置里关掉快捷键后，写进 meta 的标记。</summary>
+    public const string OffMarker = "off";
+
+    /// <summary>关掉之后界面上显示的文字。</summary>
+    public const string Disabled = "已关闭";
+
     private const int WmHotkey = 0x0312;
     private const int HotkeyId = 0x4444;
 
@@ -41,8 +47,10 @@ public sealed class HotkeyService : IDisposable
         _pressed = pressed;
         _released = released;
 
-        // 热键只有按下消息，按住还会不断重复；这里轮询按键是否仍被按着，用来判断松手
-        _holdTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+        // 热键只有按下消息，按住还会不断重复；这里轮询按键是否仍被按着，用来判断松手。
+        // 用 Input 优先级 + 一帧的间隔：默认的 Background 优先级会被布局/渲染排队压后，
+        // 松手到真正收起之间就会空出几十毫秒，手感上就是「按完了要迟一下才收」。
+        _holdTimer = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(16) };
         _holdTimer.Tick += (_, _) => CheckRelease();
 
         // 窗口句柄已经建好就直接挂消息钩子，否则等 SourceInitialized
@@ -70,13 +78,32 @@ public sealed class HotkeyService : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// 关掉快捷键：注销热键、清掉记住的组合，按住时的轮询也停下。
+    /// 之后 Apply 一次就能重新启用。
+    /// </summary>
+    public void Disable()
+    {
+        _holdTimer.Stop();
+        _holding = false;
+        _holdWatch.Reset();
+
+        _modifiers = ModifierKeys.None;
+        _key = Key.None;
+        Unregister();
+    }
+
+    /// <summary>meta 里存的是不是「已关闭」。</summary>
+    public static bool IsOff(string? saved) =>
+        string.Equals(saved?.Trim(), OffMarker, StringComparison.OrdinalIgnoreCase);
+
     private void Hook()
     {
         var handle = new WindowInteropHelper(_window).Handle;
         _source = HwndSource.FromHwnd(handle);
         _source?.AddHook(OnMessage);
 
-        // 句柄建好之前调用过 Apply 的，这里补注册一次
+        // 句柄建好之前调用过 Apply 的，这里补注册一次；关掉状态（Key.None）不补
         if (!IsRegistered && _key != Key.None) Register();
     }
 
@@ -203,12 +230,11 @@ public sealed class HotkeyService : IDisposable
     {
         _holdTimer.Stop();
 
-        if (!IsRegistered) return;
-
-        UnregisterHotKey(new WindowInteropHelper(_window).Handle, HotkeyId);
+        // 关掉过快捷键时 IsRegistered 已经是 false，但钩子还挂着，这里一并摘掉
         _source?.RemoveHook(OnMessage);
         _source = null;
-        IsRegistered = false;
+
+        Unregister();
     }
 
     [DllImport("user32.dll", SetLastError = true)]

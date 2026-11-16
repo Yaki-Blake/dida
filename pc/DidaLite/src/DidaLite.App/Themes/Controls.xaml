@@ -589,6 +589,33 @@
         </Setter>
     </Style>
 
+    <!-- 时间轴上的日程块：不要列表行那圈 16px 内边距，色块贴着内容走 -->
+    <Style x:Key="TimelineBlockButton" TargetType="Button">
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="VerticalContentAlignment" Value="Top" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusS}">
+                        <!-- 跟着 HorizontalContentAlignment 走：默认 Left（日程块靠左），
+                             需要铺满整格的地方（全天竖带）由控件自己设成 Stretch -->
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="Stretch" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- ================= 表单复选框 ================= -->
 
     <Style x:Key="FieldCheckBox" TargetType="CheckBox">
@@ -813,15 +840,6 @@
                 <Setter Property="Background" Value="{DynamicResource accent}" />
             </DataTrigger>
         </Style.Triggers>
-    </Style>
-
-    <!-- ================= 年视图的日期格：比侧栏日历小一号 ================= -->
-
-    <Style x:Key="YearDay" TargetType="Button" BasedOn="{StaticResource CalendarDay}">
-        <Setter Property="Width" Value="{StaticResource YearCalendarCell}" />
-        <Setter Property="Height" Value="{StaticResource YearCalendarCell}" />
-        <Setter Property="Margin" Value="0" />
-        <Setter Property="FontSize" Value="{StaticResource FontSize11}" />
     </Style>
 
     <!-- ================= 月视图左列的「展 / 收」 ================= -->

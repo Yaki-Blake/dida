@@ -3,13 +3,23 @@ namespace DidaLite.App.ViewModels;
 /// <summary>年视图迷你月历里的一格：非本月只占位，不显示数字、不可点。</summary>
 public sealed class YearDayViewModel
 {
-    public YearDayViewModel(DateTime date, bool isOtherMonth, bool isToday, bool isSelected, bool hasTasks)
+    public YearDayViewModel(DateTime date, bool isOtherMonth, bool isToday, bool isSelected, int taskCount)
     {
         Date = date;
         IsOtherMonth = isOtherMonth;
         IsToday = isToday;
         IsSelected = isSelected;
-        HasTasks = hasTasks;
+        TaskCount = taskCount;
+        // 非本月只占位：不画绿点，否则空白格里会冒出一颗点
+        HasTasks = !isOtherMonth && taskCount > 0;
+        HeatLevel = isOtherMonth ? 0 : taskCount switch
+        {
+            0 => 0,
+            <= 2 => 1,
+            <= 6 => 2,
+            <= 10 => 3,
+            _ => 4
+        };
     }
 
     public DateTime Date { get; }
@@ -23,6 +33,12 @@ public sealed class YearDayViewModel
 
     /// <summary>这天有任务时画一个小圆点。</summary>
     public bool HasTasks { get; }
+
+    /// <summary>当天的日程数。</summary>
+    public int TaskCount { get; }
+
+    /// <summary>年视图热度：0 留白，1 绿、2 黄、3 紫、4 红；非本月不着色。</summary>
+    public int HeatLevel { get; }
 }
 
 /// <summary>年视图里的一个月：标题、当月任务数、42 个日期格。</summary>

@@ -23,6 +23,20 @@
     <Resource Include="Assets\dida.ico" />
   </ItemGroup>
 
+  <!-- 课表数据：随程序附带；把同名文件直接放在 exe 同目录即可覆盖，调课不用重新编译 -->
+  <ItemGroup>
+    <None Update="Assets\schedule.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\schedule.ics" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\schedule_page.html" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 一键同步：浏览器端课表解析核心 + 同步参数，改文件即可调整，不必重新编译 -->
+    <None Update="Assets\gdufe_export.js" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\jwxt_sync.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 默认浏览器同步助手：书签安装页 / 页面内 runner / 可选油猴脚本 -->
+    <None Update="Assets\dida_sync.html" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\dida_sync_runner.js" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\dida_sync.user.js" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -31,6 +45,13 @@
     <UseWPF>true</UseWPF>
     <!-- 发布时预编译（ReadyToRun），省掉冷启动的 JIT -->
     <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <!-- 任务管理器/设置里的启动项显示名取自 PE 版本资源，显式固定为 dida -->
+  <PropertyGroup>
+    <AssemblyTitle>dida</AssemblyTitle>
+    <Product>dida</Product>
+    <Company>dida</Company>
   </PropertyGroup>
 
 </Project>

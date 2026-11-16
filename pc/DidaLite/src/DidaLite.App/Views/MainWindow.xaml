@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:conv="clr-namespace:DidaLite.App.Converters"
         xmlns:beh="clr-namespace:DidaLite.App.Behaviors"
+        xmlns:views="clr-namespace:DidaLite.App.Views"
         Title="滴答 · DidaLite"
         Icon="/Assets/dida.ico"
         Width="1100"
@@ -129,15 +130,142 @@
             <Setter Property="Margin" Value="4,0,4,16" />
             <Setter Property="ItemTemplate" Value="{StaticResource GroupRow}" />
         </Style>
+
+        <!-- 日视图左侧课程带的一节课：一块实心卡片，和时间轴、日程块一样边界清楚 -->
+        <DataTemplate x:Key="DayCourseBlock">
+            <Border Background="Transparent"
+                    Cursor="Hand"
+                    ClipToBounds="True"
+                    ToolTip="{Binding Tooltip}"
+                    MouseLeftButtonUp="DayCourse_Click">
+                <Border Background="{DynamicResource accent-weak}"
+                        BorderBrush="{DynamicResource accent}"
+                        BorderThickness="3,0,0,0"
+                        CornerRadius="{StaticResource RadiusS}"
+                        Margin="0,1,5,1"
+                        Padding="9,5,6,0">
+                    <StackPanel VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Name}"
+                                   FontSize="{StaticResource FontSize12}"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource text-primary}"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding TimeText}"
+                                   FontFamily="{StaticResource NumericFont}"
+                                   FontSize="{StaticResource FontSize11}"
+                                   Margin="0,2,0,0"
+                                   Foreground="{DynamicResource text-secondary}"
+                                   TextTrimming="CharacterEllipsis"
+                                   Visibility="{Binding ShowTime, Converter={StaticResource BoolToVis}}" />
+                        <TextBlock Text="{Binding RoomText}"
+                                   FontSize="{StaticResource FontSize11}"
+                                   Margin="0,2,0,0"
+                                   Foreground="{DynamicResource text-secondary}"
+                                   TextTrimming="CharacterEllipsis"
+                                   Visibility="{Binding ShowRoom, Converter={StaticResource BoolToVis}}" />
+                        <TextBlock Text="{Binding TeacherText}"
+                                   FontSize="{StaticResource FontSize11}"
+                                   Margin="0,2,0,0"
+                                   Foreground="{DynamicResource text-secondary}"
+                                   TextTrimming="CharacterEllipsis"
+                                   Visibility="{Binding ShowTeacher, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </Border>
+            </Border>
+        </DataTemplate>
+
+        <!-- 日视图右侧第一条竖带上的全天事件：不占时刻，从轴顶一直拉到轴底 -->
+        <DataTemplate x:Key="AllDayBlock">
+            <!-- Margin 放在按钮上、内容设成 Stretch：卡片和按钮底板严丝合缝，
+                 按钮的鼠标悬停底色永远被卡片盖住，右侧不会漏出一块白框 -->
+            <Button Style="{StaticResource TimelineBlockButton}"
+                    HorizontalContentAlignment="Stretch"
+                    Margin="0,1,4,1"
+                    Command="{Binding DataContext.SelectTaskCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding}"
+                    ToolTip="{Binding Title}">
+                <Border BorderBrush="{DynamicResource accent}"
+                        BorderThickness="3,0,0,0"
+                        CornerRadius="{StaticResource RadiusS}"
+                        Padding="9,7">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="{DynamicResource accent-weak}" />
+                            <Style.Triggers>
+                                <!-- 悬停反馈做在卡片自己身上，不再让按钮底板露脸 -->
+                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True">
+                                    <Setter Property="Background" Value="{DynamicResource accent-weak-hover}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel VerticalAlignment="Top">
+                        <TextBlock Text="全天"
+                                   FontSize="{StaticResource FontSize11}"
+                                   Foreground="{DynamicResource text-tertiary}" />
+                        <TextBlock Text="{Binding Title}"
+                                   FontSize="{StaticResource FontSize13}"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource text-primary}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,3,0,0" />
+                        <TextBlock Text="{Binding Location}"
+                                   FontSize="{StaticResource FontSize11}"
+                                   Foreground="{DynamicResource text-secondary}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,2,0,0"
+                                   Visibility="{Binding HasLocation, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </Border>
+            </Button>
+        </DataTemplate>
+
+        <!-- 日视图时间轴上的一块日程：块高即时长，点开是详情 -->
+        <DataTemplate x:Key="TimelineBlock">
+            <Button Style="{StaticResource TimelineBlockButton}"
+                    Command="{Binding DataContext.SelectTaskCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding Task}">
+                <Border Background="{DynamicResource accent-weak}"
+                        BorderBrush="{DynamicResource accent}"
+                        BorderThickness="3,0,0,0"
+                        CornerRadius="{StaticResource RadiusS}"
+                        Padding="8,4"
+                        Margin="0,1,0,1">
+                    <StackPanel VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Task.Title}" TextTrimming="CharacterEllipsis">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource BaseText}">
+                                    <Setter Property="FontSize" Value="{StaticResource FontSize13}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource text-primary}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Task.Done}" Value="True">
+                                            <Setter Property="TextDecorations" Value="Strikethrough" />
+                                            <Setter Property="Foreground" Value="{DynamicResource text-tertiary}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <TextBlock Text="{Binding MetaText}"
+                                   FontSize="{StaticResource FontSize11}"
+                                   Margin="0,1,0,0"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource text-secondary}"
+                                   Visibility="{Binding ShowMeta, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </Border>
+            </Button>
+        </DataTemplate>
     </Window.Resources>
 
     <Grid x:Name="RootGrid">
         <Grid.ColumnDefinitions>
-            <!-- 侧栏最小宽度就是默认宽度：分隔线只能往右拖 -->
-            <ColumnDefinition x:Name="SidebarColumn" Width="{StaticResource SidebarColumnWidth}" MinWidth="{StaticResource SidebarWidth}" />
+            <!-- 侧栏可拖窄到 180px（默认仍是 272px），也能向右拖宽 -->
+            <ColumnDefinition x:Name="SidebarColumn" Width="{StaticResource SidebarColumnWidth}" MinWidth="180" />
             <ColumnDefinition Width="Auto" />
             <!-- 最小宽度由头部「标题 + 副标题」实际需要决定，见 UpdateMainColumnMinWidth -->
-            <ColumnDefinition x:Name="MainColumn" Width="*" MinWidth="360" />
+            <ColumnDefinition x:Name="MainColumn" Width="*" MinWidth="300" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
@@ -193,10 +321,13 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Button Style="{StaticResource CalendarDay}"
-                                        Content="{Binding Day}"
-                                        Command="{Binding DataContext.SelectDayCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding}" />
+                                <!-- 只缩不放大：侧栏拖窄时 34px 的日期圆圈按格宽等比缩小，最多紧挨、绝不互相重叠 -->
+                                <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
+                                    <Button Style="{StaticResource CalendarDay}"
+                                            Content="{Binding Day}"
+                                            Command="{Binding DataContext.SelectDayCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                </Viewbox>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -205,6 +336,16 @@
                 <Border Grid.Row="1" Height="1" Background="{DynamicResource line}" Margin="16,8,16,8" />
 
                 <StackPanel Grid.Row="2">
+                    <RadioButton Style="{StaticResource SidebarItem}"
+                                 IsChecked="{Binding IsScheduleActive, Mode=OneWay}"
+                                 Command="{Binding ShowScheduleSegmentCommand}">
+                        <Grid>
+                            <TextBlock Text="课表" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Schedule.EventsCount}" Style="{StaticResource MetaText}"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
+                    </RadioButton>
+
                     <RadioButton Style="{StaticResource SidebarItem}"
                                  IsChecked="{Binding IsTodayActive, Mode=OneWay}"
                                  Command="{Binding ShowTodayCommand}">
@@ -252,17 +393,36 @@
             </Grid>
         </Border>
 
-        <!-- 侧栏与日程之间的分隔：可左右拖动改变侧栏宽度，右极限由头部文字决定 -->
+        <!-- 侧栏与日程之间的分隔：10px 命中区，可左右拖动改变侧栏宽度，右极限由头部文字决定 -->
         <Thumb x:Name="SidebarSplitter"
                Grid.Column="1"
-               Width="5"
+               Width="10"
                HorizontalAlignment="Stretch"
                VerticalAlignment="Stretch"
                Background="Transparent"
                Cursor="SizeWE"
+               ToolTip="左右拖动调整左侧栏宽度"
                AutomationProperties.AutomationId="SidebarSplitter"
                DragStarted="SidebarSplitter_DragStarted"
-               DragDelta="SidebarSplitter_DragDelta" />
+               DragDelta="SidebarSplitter_DragDelta">
+            <Thumb.Template>
+                <ControlTemplate TargetType="Thumb">
+                    <Border Background="Transparent">
+                        <Border x:Name="Grip" Width="2" Height="36"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                CornerRadius="1" Background="{DynamicResource line}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource accent}" />
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource accent}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Thumb.Template>
+        </Thumb>
 
         <!-- ============ 主区 ============ -->
         <Grid Grid.Column="2">
@@ -273,19 +433,26 @@
 
             <Grid x:Name="HeaderBar" Grid.Row="0" Height="{StaticResource HeaderHeight}" Margin="20,0,20,0">
                 <Grid.ColumnDefinitions>
-                    <!-- 左标题与右侧按钮分列，任何时候都不会互相压住 -->
-                    <ColumnDefinition Width="Auto" />
+                    <!-- 左标题可压缩（副标题走省略号），右侧按钮组保持原宽。
+                         这里千万别用 Auto 列：头部一长就会反过来把侧栏挤窄。 -->
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel x:Name="HeaderLeft" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
-                            SizeChanged="Header_SizeChanged">
-                    <TextBlock Text="{Binding MainTitle}" Style="{StaticResource PageTitle}" />
-                    <TextBlock Text="{Binding MainSubtitle}" Style="{StaticResource MetaText}" Margin="10,0,0,0" />
-                </StackPanel>
+                <Grid x:Name="HeaderLeft" Grid.Column="0" VerticalAlignment="Center"
+                      SizeChanged="Header_SizeChanged">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding MainTitle}" Style="{StaticResource PageTitle}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding MainSubtitle}" Style="{StaticResource MetaText}"
+                               Margin="10,0,0,0" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
 
-                <StackPanel x:Name="HeaderRight" Grid.Column="2" Orientation="Horizontal"
+                <StackPanel x:Name="HeaderRight" Grid.Column="1" Orientation="Horizontal"
                             HorizontalAlignment="Right" VerticalAlignment="Center"
                             SizeChanged="Header_SizeChanged">
                     <Button Command="{Binding ToggleAllWeeksCommand}" Margin="0,0,8,0">
@@ -311,6 +478,11 @@
                             CornerRadius="{StaticResource RadiusM}" Padding="2">
                         <Grid x:Name="SegmentBar">
                             <StackPanel Orientation="Horizontal">
+                                <Button x:Name="ScheduleSegmentButton"
+                                        Content="课表" Style="{StaticResource SegmentButton}"
+                                        Tag="{Binding IsScheduleSegment}"
+                                        CommandParameter="schedule"
+                                        Click="Segment_Click" />
                                 <Button x:Name="DaySegmentButton"
                                         Content="日" Style="{StaticResource SegmentButton}"
                                         Tag="{Binding IsDaySegment}"
@@ -376,6 +548,90 @@
                     <TranslateTransform x:Name="ContentSlide" />
                 </Grid.RenderTransform>
 
+                <!-- 日视图：左边天空色时间轴，右边按时刻绝对定位的日程块 -->
+                <ScrollViewer x:Name="TimelineScroll"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Visibility="{Binding IsTimelineView, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Margin="0,0,6,24">
+                        <!-- 逾期 / 未排时间 -->
+                        <ItemsControl ItemsSource="{Binding TimelineGroups}" Style="{StaticResource GroupedList}" />
+
+                        <Grid Height="{Binding TimelineHeight}" Margin="8,0,8,0" ClipToBounds="True">
+                            <Grid.ColumnDefinitions>
+                                <!-- 导入课表后左边让出一节课的宽度，时间轴整体右移；没导入时收成 0 -->
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="64" />
+                                <!-- 全天事件竖带：没有全天事件时收成 0 -->
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <views:DaySkyBoard Grid.ColumnSpan="4"
+                                               RulerWidth="64"
+                                               LaneWidth="{Binding CourseLaneWidth}"
+                                               StartHour="{Binding TimelineStartHour}"
+                                               EndHour="{Binding TimelineEndHour}"
+                                               HourHeight="{Binding TimelineHourHeight}"
+                                               NowHour="{Binding TimelineNowHour}"
+                                               IsDark="{Binding IsDark}" />
+
+                            <!-- 课程带：一节课一条渐渐淡去的色带，位置与右边日程块同一套刻度 -->
+                            <Grid Grid.Column="0"
+                                  Width="{Binding CourseLaneWidth}"
+                                  Visibility="{Binding ShowCourseLane, Converter={StaticResource BoolToVis}}">
+                                <ItemsControl ItemsSource="{Binding DayCourses}"
+                                              ItemTemplate="{StaticResource DayCourseBlock}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <views:CourseLanePanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+
+                                <TextBlock Text="这天没课"
+                                           Style="{StaticResource HintText}"
+                                           Margin="12,8,0,0"
+                                           VerticalAlignment="Top"
+                                           Visibility="{Binding IsCourseLaneEmpty, Converter={StaticResource BoolToVis}}" />
+                            </Grid>
+
+                            <!-- 全天事件：紧贴时间轴右侧的第一条竖带，从轴顶拉到轴底。
+                                 宽度不给死值：Auto 列按卡片内容量出来，题目多宽竖带就多宽，
+                                 只留上下限——太窄撑不住，太长就把时间轴挤没了（超了自动换行） -->
+                            <ItemsControl Grid.Column="2"
+                                          MinWidth="{Binding AllDayLaneMinWidth}"
+                                          MaxWidth="{Binding AllDayLaneMaxWidth}"
+                                          HorizontalAlignment="Left"
+                                          ItemsSource="{Binding AllDayItems}"
+                                          ItemTemplate="{StaticResource AllDayBlock}"
+                                          Visibility="{Binding HasAllDayItems, Converter={StaticResource BoolToVis}}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="1" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemContainerStyle>
+                                    <Style TargetType="ContentPresenter">
+                                        <Setter Property="VerticalAlignment" Value="Stretch" />
+                                        <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                    </Style>
+                                </ItemsControl.ItemContainerStyle>
+                            </ItemsControl>
+
+                            <ItemsControl Grid.Column="3"
+                                          ItemsSource="{Binding TimelineBlocks}"
+                                          ItemTemplate="{StaticResource TimelineBlock}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <views:TimelinePanel />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+
                 <!-- 列表 / 周视图：各用一份容器，来回切换时不重建 -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               Visibility="{Binding IsListView, Converter={StaticResource BoolToVis}}">
@@ -387,10 +643,11 @@
                     <ItemsControl x:Name="WeekList" ItemsSource="{Binding WeekGroups}" Style="{StaticResource GroupedList}" />
                 </ScrollViewer>
 
-                <!-- 月 / 年 / 专注：首次切过去才创建，启动时只留占位 -->
+                <!-- 月 / 年 / 专注 / 课表：首次切过去才创建，启动时只留占位 -->
                 <ContentControl x:Name="MonthHost" Visibility="{Binding IsMonthView, Converter={StaticResource BoolToVis}}" />
                 <ContentControl x:Name="YearHost" Visibility="{Binding IsYearView, Converter={StaticResource BoolToVis}}" />
                 <ContentControl x:Name="FocusHost" Visibility="{Binding IsFocusView, Converter={StaticResource BoolToVis}}" />
+                <ContentControl x:Name="ScheduleHost" Visibility="{Binding IsScheduleView, Converter={StaticResource BoolToVis}}" />
 
                 <!-- 空态（列表视图） -->
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"

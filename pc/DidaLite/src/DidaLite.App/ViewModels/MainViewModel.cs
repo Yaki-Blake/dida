@@ -20,7 +20,8 @@ public enum ViewMode
     Year,
     All,
     Done,
-    Focus
+    Focus,
+    Schedule
 }
 
 /// <summary>列表里的一个分组（周视图下即一天）。</summary>
@@ -56,6 +57,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly LocalStore _store;
     private readonly SyncClient? _sync;
     private readonly DispatcherTimer _undoTimer;
+    private readonly DispatcherTimer _nowTimer;
 
     private List<TaskItem> _all = [];
     private TaskViewModel? _pendingUndo;
@@ -84,6 +86,7 @@ public sealed partial class MainViewModel : ObservableObject
         SyncText = "未同步";
         IsDark = string.Equals(store.GetMeta("theme"), "dark", StringComparison.OrdinalIgnoreCase);
         Focus = new FocusViewModel(store, alarms);
+        Schedule = new ScheduleViewModel();
 
         _undoTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _undoTimer.Tick += (_, _) =>
@@ -95,6 +98,31 @@ public sealed partial class MainViewModel : ObservableObject
             _undoWasAdvance = false;
             Load();
         };
+
+        // 时间轴上的「现在」红线每分钟挪一格；不在日视图时几乎不做事
+        _nowTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        _nowTimer.Tick += (_, _) => UpdateTimelineNow();
+        _nowTimer.Start();
+
+        // 导入 / 清空课表后课程带要跟着出现或收起；HTTP 导入在后台线程，得回 UI 线程刷新
+        ScheduleStore.DataChanged += OnScheduleDataChanged;
+    }
+
+    /// <summary>课表数据改过：课程带宽度、当天课程都要重算。</summary>
+    private void OnScheduleDataChanged()
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess()) ApplyScheduleChanged();
+        else dispatcher.Invoke(ApplyScheduleChanged);
+    }
+
+    private void ApplyScheduleChanged()
+    {
+        _scheduleRevision++;
+        OnPropertyChanged(nameof(ShowCourseLane));
+        OnPropertyChanged(nameof(CourseLaneWidth));
+        Load();
+        OnPropertyChanged(nameof(IsCourseLaneEmpty));
     }
 
     // ---------------- 集合 ----------------
@@ -104,12 +132,39 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>周视图单独一份分组，和日列表分开保存，来回切换时容器不用重建。</summary>
     public ObservableCollection<TaskGroup> WeekGroups { get; } = [];
 
+    /// <summary>时间轴上方的分组：今天视图的「逾期」与当天的「未排时间」。</summary>
+    public ObservableCollection<TaskGroup> TimelineGroups { get; } = [];
+
+    /// <summary>时间轴上按开始时刻绝对定位的日程块。</summary>
+    public ObservableCollection<TimelineBlockViewModel> TimelineBlocks { get; } = [];
+
+    /// <summary>日视图左侧课程带上的课，和右边日程块用同一套时刻刻度。</summary>
+    public ObservableCollection<DayCourseBlockViewModel> DayCourses { get; } = [];
+
+    /// <summary>当天的全天事件：铺在时间轴右侧第一条竖带里，从轴顶一直拉到轴底。</summary>
+    public ObservableCollection<TaskViewModel> AllDayItems { get; } = [];
+
+    /// <summary>没有全天事件时整条竖带收起，日视图保持原样。</summary>
+    public bool HasAllDayItems => AllDayItems.Count > 0;
+
+    /// <summary>
+    /// 全天竖带最窄放到多少：一个字的标题也不至于缩成一条缝。
+    /// 宽度本身由 Auto 列按卡片内容量出来（见 MainWindow.xaml），这里只管下限。
+    /// </summary>
+    public double AllDayLaneMinWidth => 104;
+
+    /// <summary>全天竖带的宽度上限：再长的标题就在这里折行，别把时间轴挤没了。</summary>
+    public double AllDayLaneMaxWidth => 200;
+
     public ObservableCollection<MonthWeekViewModel> MonthWeeks { get; } = [];
     public ObservableCollection<CalendarDayViewModel> Days { get; } = [];
     public ObservableCollection<YearMonthViewModel> YearMonths { get; } = [];
 
     /// <summary>专注页（倒计时 / 秒表 / 闹钟）。</summary>
     public FocusViewModel Focus { get; }
+
+    /// <summary>课表页（按教学周展开的网格 / 单日列表）。</summary>
+    public ScheduleViewModel Schedule { get; }
     public IReadOnlyList<string> WeekDays { get; } = ["一", "二", "三", "四", "五", "六", "日"];
 
     public IReadOnlyList<string> RepeatLabels { get; } =
@@ -139,11 +194,55 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>唤出主界面的快捷键，如 Alt+D；点按钮可改。</summary>
     [ObservableProperty] private string _hotkeyText = HotkeyService.Default;
 
+    /// <summary>快捷键是否被关掉了：设置里点「关闭」后为 true。</summary>
+    [ObservableProperty] private bool _isHotkeyOff;
+
     /// <summary>月格固定占用：日期行高 + 格子上下内边距。</summary>
     public const double MonthCellChrome = 27;
 
     /// <summary>月格内一条日程的高度（含下间距）。</summary>
     public const double MonthItemHeight = 19;
+
+    // ---------------- 日视图时间轴 ----------------
+
+    /// <summary>时间轴一小时的像素高度。</summary>
+    public double TimelineHourHeight => 56;
+
+    /// <summary>时间轴默认从 6 点画到 23 点，有更早 / 更晚的日程再向外扩。</summary>
+    [ObservableProperty] private int _timelineStartHour = 6;
+    [ObservableProperty] private int _timelineEndHour = 23;
+
+    /// <summary>「现在」红线在时间轴上的小时位置，带小数；不是今天或不在范围内时为 -1。</summary>
+    [ObservableProperty] private double _timelineNowHour = -1;
+
+    public double TimelineHeight => Math.Max(1, TimelineEndHour - TimelineStartHour) * TimelineHourHeight;
+
+    partial void OnTimelineStartHourChanged(int value) => OnPropertyChanged(nameof(TimelineHeight));
+
+    partial void OnTimelineEndHourChanged(int value) => OnPropertyChanged(nameof(TimelineHeight));
+
+    /// <summary>日视图看的是哪一天：今天视图跟着真实日期走。</summary>
+    private DateTime TimelineDate => Mode == ViewMode.Today ? DateTime.Today : SelectedDate.Date;
+
+    /// <summary>课程带的宽度：刚好放下一节课的卡片。没导入课表时整条带子收起。</summary>
+    private const double CourseLaneWidthPx = 148;
+
+    /// <summary>课表里导入过课，日视图才让出左侧课程带。</summary>
+    public bool ShowCourseLane => ScheduleStore.Instance.Events.Count > 0;
+
+    /// <summary>课程带实际宽度，未导入课表时为 0。</summary>
+    public double CourseLaneWidth => ShowCourseLane ? CourseLaneWidthPx : 0;
+
+    /// <summary>导入过课表、但这天没课：课程带留一条空的沙岸，给一句淡淡的提示。</summary>
+    public bool IsCourseLaneEmpty => ShowCourseLane && DayCourses.Count == 0;
+
+    /// <summary>刷新「现在」红线：只在时间轴可见且看的是今天时才出现。</summary>
+    private void UpdateTimelineNow()
+    {
+        TimelineNowHour = IsTimelineView && TimelineDate == DateTime.Today
+            ? DateTime.Now.TimeOfDay.TotalHours
+            : -1;
+    }
 
     /// <summary>月视图每一行的最小高度，由窗口大小决定。</summary>
     [ObservableProperty] private double _monthRowHeight = 96;
@@ -182,11 +281,15 @@ public sealed partial class MainViewModel : ObservableObject
 
     public string DetailTitle => IsNewTask ? "新建任务" : "任务详情";
 
-    public bool IsListView => Mode is ViewMode.Today or ViewMode.Day or ViewMode.All or ViewMode.Done;
+    /// <summary>今天 / 某一天用天空色时间轴展示，其余列表模式走分组列表。</summary>
+    public bool IsTimelineView => Mode is ViewMode.Today or ViewMode.Day;
+
+    public bool IsListView => Mode is ViewMode.All or ViewMode.Done;
     public bool IsWeekView => Mode == ViewMode.Week;
     public bool IsMonthView => Mode == ViewMode.Month;
     public bool IsYearView => Mode == ViewMode.Year;
     public bool IsFocusView => Mode == ViewMode.Focus;
+    public bool IsScheduleView => Mode == ViewMode.Schedule;
 
     /// <summary>周视图同样使用分组列表，只是每天一组。</summary>
     public bool IsGroupedView => IsListView || IsWeekView;
@@ -196,10 +299,12 @@ public sealed partial class MainViewModel : ObservableObject
     public bool IsMonthSegment => Mode == ViewMode.Month;
     public bool IsYearSegment => Mode == ViewMode.Year;
     public bool IsFocusSegment => Mode == ViewMode.Focus;
+    public bool IsScheduleSegment => Mode == ViewMode.Schedule;
 
     public bool IsTodayActive => Mode == ViewMode.Today;
     public bool IsAllActive => Mode == ViewMode.All;
     public bool IsDoneActive => Mode == ViewMode.Done;
+    public bool IsScheduleActive => Mode == ViewMode.Schedule;
 
     partial void OnEditAllDayChanged(bool value) => OnPropertyChanged(nameof(IsTimed));
 
@@ -295,6 +400,14 @@ public sealed partial class MainViewModel : ObservableObject
         Load();
     }
 
+    /// <summary>课表分段：数据由 ScheduleViewModel 自己按教学周展开，不与任务列表混在一起。</summary>
+    [RelayCommand]
+    private void ShowScheduleSegment()
+    {
+        Mode = ViewMode.Schedule;
+        Load();
+    }
+
     [RelayCommand]
     private void SelectDay(CalendarDayViewModel? day)
     {
@@ -311,7 +424,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>左面板键盘导航：按天 / 按周移动当前选中日期，主面板跟着换那一天。</summary>
     public void MoveSelectedDate(int days)
     {
-        if (Mode == ViewMode.Focus) return;
+        if (Mode is ViewMode.Focus or ViewMode.Schedule) return;
 
         SelectedDate = SelectedDate.Date.AddDays(days);
         DisplayMonth = new DateTime(SelectedDate.Year, SelectedDate.Month, 1);
@@ -568,7 +681,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     private (string Text, List<TaskItem> Items) BulkDonePlan()
     {
-        if (Mode is ViewMode.Done or ViewMode.Focus) return (string.Empty, []);
+        if (Mode is ViewMode.Done or ViewMode.Focus or ViewMode.Schedule) return (string.Empty, []);
 
         var active = _all.Where(t => !t.Deleted && !t.Done).ToList();
 
@@ -764,6 +877,15 @@ public sealed partial class MainViewModel : ObservableObject
     private string _weekSignature = string.Empty;
     private DateTime _weekKeyDate = DateTime.MinValue;
 
+    /// <summary>上次构建时间轴时用的数据指纹、日期与模式，一致就跳过重建。</summary>
+    private string _timelineSignature = string.Empty;
+    private DateTime _timelineKeyDate = DateTime.MinValue;
+    private ViewMode _timelineKeyMode = ViewMode.Day;
+
+    /// <summary>课表数据版本：每次导入 / 清空加一，时间轴据此重建课程带。</summary>
+    private int _scheduleRevision;
+    private int _timelineKeySchedule;
+
     public void Load()
     {
         _all = _store.GetAll();
@@ -808,6 +930,13 @@ public sealed partial class MainViewModel : ObservableObject
             IsEmpty = false;
             _groupsKeyMode = null;
         }
+        else if (Mode == ViewMode.Schedule)
+        {
+            // 课表数据不来自任务库，别让分组列表 / 空态来插一脚
+            Groups.Clear();
+            IsEmpty = false;
+            _groupsKeyMode = null;
+        }
         else if (Mode == ViewMode.Week)
         {
             if (signature != _weekSignature || SelectedDate.Date != _weekKeyDate)
@@ -816,6 +945,24 @@ public sealed partial class MainViewModel : ObservableObject
                 _weekSignature = signature;
                 _weekKeyDate = SelectedDate.Date;
             }
+        }
+        else if (Mode is ViewMode.Today or ViewMode.Day)
+        {
+            if (signature != _timelineSignature
+                || TimelineDate != _timelineKeyDate
+                || Mode != _timelineKeyMode
+                || _scheduleRevision != _timelineKeySchedule)
+            {
+                BuildTimeline();
+                _timelineSignature = signature;
+                _timelineKeyDate = TimelineDate;
+                _timelineKeyMode = Mode;
+                _timelineKeySchedule = _scheduleRevision;
+            }
+
+            // 时间轴自己撑满，空态文案由上面的「未排时间」占位负责
+            IsEmpty = false;
+            UpdateTimelineNow();
         }
         else
         {
@@ -841,20 +988,24 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void NotifyModeFlags()
     {
+        OnPropertyChanged(nameof(IsTimelineView));
         OnPropertyChanged(nameof(IsListView));
         OnPropertyChanged(nameof(IsWeekView));
         OnPropertyChanged(nameof(IsMonthView));
         OnPropertyChanged(nameof(IsYearView));
         OnPropertyChanged(nameof(IsFocusView));
+        OnPropertyChanged(nameof(IsScheduleView));
         OnPropertyChanged(nameof(IsGroupedView));
         OnPropertyChanged(nameof(IsDaySegment));
         OnPropertyChanged(nameof(IsWeekSegment));
         OnPropertyChanged(nameof(IsMonthSegment));
         OnPropertyChanged(nameof(IsYearSegment));
         OnPropertyChanged(nameof(IsFocusSegment));
+        OnPropertyChanged(nameof(IsScheduleSegment));
         OnPropertyChanged(nameof(IsTodayActive));
         OnPropertyChanged(nameof(IsAllActive));
         OnPropertyChanged(nameof(IsDoneActive));
+        OnPropertyChanged(nameof(IsScheduleActive));
         OnPropertyChanged(nameof(CanBulkDone));
         OnPropertyChanged(nameof(BulkDoneText));
     }
@@ -935,7 +1086,7 @@ public sealed partial class MainViewModel : ObservableObject
                     isOtherMonth: other,
                     isToday: date == DateTime.Today,
                     isSelected: date == SelectedDate.Date,
-                    hasTasks: count > 0));
+                    taskCount: count));
             }
 
             YearMonths.Add(new YearMonthViewModel(year, month, days, total));
@@ -1018,6 +1169,169 @@ public sealed partial class MainViewModel : ObservableObject
         foreach (var group in groups) target.Add(group);
 
         IsEmpty = Mode != ViewMode.Week && !groups.Any(g => g.Items.Count > 0);
+    }
+
+    /// <summary>日视图：没有具体时刻的日程列在轴上方，带时刻的按开始时间摆到天空色时间轴上。</summary>
+    private void BuildTimeline()
+    {
+        var date = TimelineDate;
+        var visible = _all.Where(t => !t.Deleted).ToList();
+
+        TimelineGroups.Clear();
+
+        void Add(string header, IEnumerable<TaskItem> source, string brush, string emptyHint = "")
+        {
+            var items = source
+                .OrderBy(t => t.AnchorAt ?? long.MaxValue)
+                .ThenBy(t => t.Title, StringComparer.CurrentCulture)
+                .Select(t => new TaskViewModel(t))
+                .ToList();
+
+            if (items.Count == 0 && emptyHint.Length == 0) return;
+
+            TimelineGroups.Add(new TaskGroup
+            {
+                Header = header,
+                HeaderBrushKey = brush,
+                Items = items,
+                EmptyHint = emptyHint
+            });
+        }
+
+        // 今天视图保留「逾期」入口，否则逾期任务在日视图里就看不到了
+        if (Mode == ViewMode.Today) Add("逾期", visible.Where(t => !t.Done && IsOverdue(t)), "danger");
+
+        var dayTasks = visible.Where(t => LocalDateOf(t) == date).ToList();
+
+        // 全天事件不占时刻，铺在时间轴右侧那条竖带里，从轴顶拉到轴底
+        AllDayItems.Clear();
+        foreach (var task in dayTasks
+                     .Where(t => t.AllDay)
+                     .OrderBy(t => t.AnchorAt ?? long.MaxValue)
+                     .ThenBy(t => t.Title, StringComparer.CurrentCulture))
+        {
+            AllDayItems.Add(new TaskViewModel(task));
+        }
+
+        OnPropertyChanged(nameof(HasAllDayItems));
+
+        // 全天事件已经在竖带里了，这里只剩真没填时刻的
+        Add("未排时间", dayTasks.Where(t => !t.AllDay && t.StartAt is null), "text-secondary");
+
+        // 有开始时刻的才上时间轴；没填截止就按半小时算，跨天也保留真实时长
+        var scheduled = new List<(TaskItem Task, double Start, double End)>();
+        foreach (var task in dayTasks)
+        {
+            if (task.AllDay || ToLocal(task.StartAt) is not DateTime start) continue;
+
+            var end = ToLocal(task.DueAt) ?? start.AddMinutes(30);
+            if (end <= start) end = start.AddMinutes(30);
+
+            scheduled.Add((task, (start - date).TotalMinutes, (end - date).TotalMinutes));
+        }
+
+        // 左边课程带：只取当天的课；时刻解析不出来就跳过，不让一条脏数据毁掉整条轴
+        var courses = new List<(ScheduleEvent Course, double Start, double End)>();
+        var dayKey = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        foreach (var course in ScheduleStore.Instance.Events)
+        {
+            if (course.Date != dayKey) continue;
+            if (!TryMinutes(course.Start, out var courseStart)) continue;
+
+            var courseEnd = TryMinutes(course.End, out var parsedEnd) && parsedEnd > courseStart
+                ? parsedEnd
+                : courseStart + 90;
+
+            courses.Add((course, courseStart, courseEnd));
+        }
+
+        // 默认 6 点到 23 点，有超出这个区间的日程 / 课程就把时间轴撑到能看见它
+        var startHour = 6;
+        var endHour = 23;
+
+        foreach (var (_, start, end) in scheduled)
+        {
+            startHour = Math.Min(startHour, (int)Math.Floor(start / 60));
+            endHour = Math.Max(endHour, (int)Math.Ceiling(end / 60));
+        }
+
+        foreach (var (_, start, end) in courses)
+        {
+            startHour = Math.Min(startHour, (int)Math.Floor(start / 60));
+            endHour = Math.Max(endHour, (int)Math.Ceiling(end / 60));
+        }
+
+        TimelineStartHour = Math.Clamp(startHour, 0, 23);
+        TimelineEndHour = Math.Clamp(endHour, TimelineStartHour + 1, 24);
+
+        // 课程带：和日程块共用同一套刻度，两边的时间才对得上
+        DayCourses.Clear();
+        foreach (var (course, courseStart, courseEnd) in courses.OrderBy(c => c.Start))
+        {
+            DayCourses.Add(new DayCourseBlockViewModel(
+                course,
+                top: (courseStart / 60 - TimelineStartHour) * TimelineHourHeight,
+                height: Math.Max(26, (courseEnd - courseStart) / 60 * TimelineHourHeight)));
+        }
+
+        OnPropertyChanged(nameof(IsCourseLaneEmpty));
+
+        TimelineBlocks.Clear();
+
+        // 重叠的日程并排摆：先切出互相重叠的一簇，再在簇内贪心分列，避免全轴都被压窄
+        var ordered = scheduled.OrderBy(s => s.Start).ThenBy(s => s.End).ToList();
+        for (var first = 0; first < ordered.Count;)
+        {
+            var clusterEnd = ordered[first].End;
+            var last = first + 1;
+            while (last < ordered.Count && ordered[last].Start < clusterEnd)
+            {
+                clusterEnd = Math.Max(clusterEnd, ordered[last].End);
+                last++;
+            }
+
+            var laneEnds = new List<double>();
+            var lanes = new int[last - first];
+
+            for (var i = first; i < last; i++)
+            {
+                var lane = laneEnds.FindIndex(e => e <= ordered[i].Start);
+                if (lane < 0)
+                {
+                    laneEnds.Add(0);
+                    lane = laneEnds.Count - 1;
+                }
+
+                laneEnds[lane] = ordered[i].End;
+                lanes[i - first] = lane;
+            }
+
+            for (var i = first; i < last; i++)
+            {
+                var (task, start, end) = ordered[i];
+
+                TimelineBlocks.Add(new TimelineBlockViewModel(
+                    new TaskViewModel(task),
+                    top: (start / 60 - TimelineStartHour) * TimelineHourHeight,
+                    height: Math.Max(26, (end - start) / 60 * TimelineHourHeight),
+                    lane: lanes[i - first],
+                    laneCount: laneEnds.Count));
+            }
+
+            first = last;
+        }
+    }
+
+    /// <summary>把课表里的「08:30」换成从零点起的分钟数。</summary>
+    private static bool TryMinutes(string? text, out double minutes)
+    {
+        minutes = 0;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (!TimeSpan.TryParse(text.Trim(), CultureInfo.InvariantCulture, out var span)) return false;
+        if (span < TimeSpan.Zero || span >= TimeSpan.FromDays(1)) return false;
+
+        minutes = span.TotalMinutes;
+        return true;
     }
 
     private void BuildMonth()
@@ -1238,6 +1552,11 @@ public sealed partial class MainViewModel : ObservableObject
             case ViewMode.Focus:
                 MainTitle = "专注";
                 MainSubtitle = "倒计时 · 秒表 · 闹钟";
+                break;
+
+            case ViewMode.Schedule:
+                MainTitle = "课表";
+                MainSubtitle = $"{Schedule.Term} · 第 1 周 {Schedule.Week1Monday} · 共 {Schedule.EventsCount} 节课";
                 break;
         }
     }
