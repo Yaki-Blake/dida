@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using DidaLite.Core;
 
 namespace DidaLite.App.Services;
 
@@ -11,7 +12,7 @@ public sealed record ImportResult(bool Ok, int Events, int Courses, string Sourc
 
 /// <summary>
 /// 课表导入：把浏览器书签导出的 .ics，或课表快照 .json，解析成 ScheduleStore 的内存数据，
-/// 落盘到 exe 旁的 Assets，然后就地刷新，界面和 5080 接口立刻生效，不必重启。
+/// 落盘到用户数据目录，然后就地刷新，界面和 5080 接口立刻生效，不必重启。
 /// 只处理本机文件，不联网、不碰任务库、不读取任何凭据。
 /// </summary>
 public static class ScheduleImporter
@@ -361,15 +362,11 @@ public static class ScheduleImporter
 
     private static void Persist(ScheduleFile data, byte[] ics)
     {
-        // 与 ScheduleStore.Pick 保持一致：exe 同目录有同名文件就写那里，否则写 Assets
-        var baseDir = AppContext.BaseDirectory;
-        var direct = Path.Combine(baseDir, "schedule.json");
-        var targetDir = File.Exists(direct) ? baseDir : Path.Combine(baseDir, "Assets");
-        Directory.CreateDirectory(targetDir);
-
-        File.WriteAllText(Path.Combine(targetDir, "schedule.json"),
+        // 一律写用户数据目录：程序可能被装到 Program Files 之类只读位置，
+        // 往 exe 同目录写会在导入时报「拒绝访问」。
+        File.WriteAllText(DataPaths.Write("schedule.json"),
             JsonSerializer.Serialize(data, ScheduleStore.Json), Utf8NoBom);
-        File.WriteAllBytes(Path.Combine(targetDir, "schedule.ics"), ics);
+        File.WriteAllBytes(DataPaths.Write("schedule.ics"), ics);
 
         ScheduleStore.Instance.Reload();
     }

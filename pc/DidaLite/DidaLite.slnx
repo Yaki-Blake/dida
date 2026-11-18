@@ -3,6 +3,7 @@
     <Project Path="src/DidaLite.App/DidaLite.App.csproj" />
     <Project Path="src/DidaLite.Core/DidaLite.Core.csproj" />
     <Project Path="src/DidaLite.Data/DidaLite.Data.csproj" />
+    <Project Path="src/DidaLite.Sync/DidaLite.Sync.csproj" />
     <Project Path="src/DidaLite.Tests/DidaLite.Tests.csproj" />
   </Folder>
 </Solution>

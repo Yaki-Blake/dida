@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Threading;
 using DidaLite.App.Services;
 using DidaLite.App.ViewModels;
 using Microsoft.Win32;
@@ -88,8 +89,18 @@ public partial class ScheduleView : UserControl
 
         var result = ScheduleImporter.ImportFile(dialog.FileName);
         (DataContext as ScheduleViewModel)?.Refresh();
-        MessageBox.Show(result.Message + "\n\n来源：" + result.Source, "导入课表",
-            MessageBoxButton.OK, result.Ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
+
+        // 成功同样不弹窗：结果落在按钮上；只有失败才用对话框说明原因
+        if (!result.Ok)
+        {
+            MessageBox.Show(result.Message + "\n\n来源：" + result.Source, "导入课表",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (sender is Button button)
+            FlashButton(button, $"已导入 {result.Events} 节",
+                result.Message + "\n来源：" + result.Source);
     }
 
     /// <summary>
@@ -114,20 +125,64 @@ public partial class ScheduleView : UserControl
             button.ToolTip = message + "\n（点击可取消）";
         });
 
+        SyncResult? result = null;
         try
         {
-            var result = await JwxtSyncService.SyncAsync(progress, _syncCts.Token);
+            result = await JwxtSyncService.SyncAsync(progress, _syncCts.Token);
             (DataContext as ScheduleViewModel)?.Refresh();
-            MessageBox.Show(result.Message, "一键同步",
-                MessageBoxButton.OK, result.Ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
+
+            // 成功不再弹系统 MessageBox：结果直接落在按钮上，几秒后自动复原。
+            // 失败仍用对话框——错误信息必须让人看见，不能吞掉。
+            if (!result.Ok)
+            {
+                MessageBox.Show(result.Message, "一键同步",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
         finally
         {
             _syncCts.Dispose();
             _syncCts = null;
-            button.Content = "一键同步";
-            button.ToolTip = "打开本机的「同步助手」页：从助手里进教务课表页，点一下书签即可同步（点击可取消）";
+
+            if (result is { Ok: true })
+            {
+                // 先把默认文案放回去，FlashButton 4 秒后还原的就是「一键同步」
+                ResetSyncButton(button);
+                FlashButton(button, $"已同步 {result.Events} 节",
+                    result.Message + "\n（点击可再次同步）");
+            }
+            else
+            {
+                ResetSyncButton(button);
+            }
         }
+    }
+
+    /// <summary>成功后的即时反馈：按钮暂时显示结果，4 秒后还原成调用前的文案。</summary>
+    private void FlashButton(Button button, string text, string toolTip)
+    {
+        var content = button.Content;
+        var tip = button.ToolTip;
+
+        button.Content = text;
+        button.ToolTip = toolTip;
+
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            // 期间又发起了一次同步就不要抢它的状态文案
+            if (_syncCts is not null) return;
+            button.Content = content;
+            button.ToolTip = tip;
+        };
+        timer.Start();
+    }
+
+    private static void ResetSyncButton(Button button)
+    {
+        button.Content = "一键同步";
+        button.ToolTip = "打开本机的「同步助手」页：从助手里进教务课表页，点一下书签即可同步（点击可取消）";
     }
 
     private static string ShortState(string message)

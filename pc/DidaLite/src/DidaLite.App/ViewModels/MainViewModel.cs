@@ -4,6 +4,7 @@ using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DidaLite.App.Services;
+using DidaLite.Core;
 using DidaLite.Core.Models;
 using DidaLite.Core.Reminders;
 using DidaLite.Data;
@@ -21,11 +22,12 @@ public enum ViewMode
     All,
     Done,
     Focus,
-    Schedule
+    Schedule,
+    Notes
 }
 
 /// <summary>列表里的一个分组（周视图下即一天）。</summary>
-public sealed class TaskGroup
+public sealed partial class TaskGroup : ObservableObject
 {
     public string Header { get; init; } = string.Empty;
     public string HeaderBrushKey { get; init; } = "text-secondary";
@@ -34,6 +36,28 @@ public sealed class TaskGroup
 
     /// <summary>空分组时显示的占位文案，空字符串表示不显示。</summary>
     public string EmptyHint { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 是否允许折叠。日视图的「逾期」分组会攒到几十条，全铺在时间轴上方会把时间轴顶出首屏，
+    /// 所以超过阈值时默认折起来，只留一行标题。
+    /// </summary>
+    public bool CanCollapse { get; init; }
+
+    [ObservableProperty] private bool _isCollapsed;
+
+    public bool IsExpanded => !IsCollapsed;
+
+    /// <summary>折叠按钮上的文案，例如「40 条 · 展开」。</summary>
+    public string ToggleLabel => $"{Items.Count} 条 · {(IsCollapsed ? "展开" : "收起")}";
+
+    partial void OnIsCollapsedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsExpanded));
+        OnPropertyChanged(nameof(ToggleLabel));
+    }
+
+    [RelayCommand]
+    private void ToggleCollapse() => IsCollapsed = !IsCollapsed;
 }
 
 public sealed partial class MainViewModel : ObservableObject
@@ -70,6 +94,9 @@ public sealed partial class MainViewModel : ObservableObject
     private long? _undoRemindAt;
     private bool _undoWasAdvance;
 
+    /// <summary>同步回来发现闹钟被手机端改过，用它把「专注 → 闹钟」列表刷一遍。</summary>
+    private readonly AlarmService? _alarms;
+
     /// <summary>月视图当前加载的「日期 → 当天全部任务」，展开 / 收起时按需重新截取。</summary>
     private Dictionary<DateTime, List<TaskItem>> _monthByDate = [];
 
@@ -79,10 +106,34 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>点了同步但电脑上还没有同步账号：由窗口层打开设置。</summary>
     public event Action? AccountRequired;
 
+    /// <summary>
+    /// 同步浮层：窗口层收到后自己在右上角弹一条（先「正在同步」，再换成数字 / 失败原因）。
+    /// 视图模型只负责说「该显示什么」，动画和排布都在窗口层。
+    /// </summary>
+    public event Action<SyncToastInfo>? SyncToastRequested;
+
+    /// <summary>
+    /// 开关：启动时那次「静默同步」不该弹浮层——用户没点同步，冒出来只是打扰。
+    /// 手动点「同步」/ Ctrl+R 时保持 true。
+    /// </summary>
+    public bool SyncToastEnabled { get; set; } = true;
+
+    private void Toast(SyncToastInfo info)
+    {
+        if (SyncToastEnabled) SyncToastRequested?.Invoke(info);
+    }
+
+    /// <summary>
+    /// 换了同步账号、需要先清空本地数据：破坏性操作不能在后台悄悄做，
+    /// 由窗口层弹确认框，返回 true 才继续同步。
+    /// </summary>
+    public event Func<string, bool>? ConfirmAccountSwitch;
+
     public MainViewModel(LocalStore store, AlarmService? alarms = null, SyncClient? sync = null)
     {
         _store = store;
         _sync = sync;
+        _alarms = alarms;
         SyncText = "未同步";
         IsDark = string.Equals(store.GetMeta("theme"), "dark", StringComparison.OrdinalIgnoreCase);
         Focus = new FocusViewModel(store, alarms);
@@ -106,6 +157,16 @@ public sealed partial class MainViewModel : ObservableObject
 
         // 导入 / 清空课表后课程带要跟着出现或收起；HTTP 导入在后台线程，得回 UI 线程刷新
         ScheduleStore.DataChanged += OnScheduleDataChanged;
+
+        // 便签边打边存：停手 0.6 秒落一次盘
+        _noteSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        _noteSaveTimer.Tick += (_, _) =>
+        {
+            _noteSaveTimer.Stop();
+            FlushNote();
+        };
+
+        LoadNotes();
     }
 
     /// <summary>课表数据改过：课程带宽度、当天课程都要重算。</summary>
@@ -205,8 +266,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     // ---------------- 日视图时间轴 ----------------
 
-    /// <summary>时间轴一小时的像素高度。</summary>
-    public double TimelineHourHeight => 56;
+    /// <summary>时间轴一小时的像素高度。日程块、课程带、全天事件竖带都按这个刻度换算，改一处即可。</summary>
+    public double TimelineHourHeight => 48;
 
     /// <summary>时间轴默认从 6 点画到 23 点，有更早 / 更晚的日程再向外扩。</summary>
     [ObservableProperty] private int _timelineStartHour = 6;
@@ -261,6 +322,22 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>手机端要填的同步地址，同步服务起来后由窗口填进来。</summary>
     [ObservableProperty] private string _syncAddress = string.Empty;
 
+    /// <summary>权威库在公共服务器（true）还是本机（false），设置页据此换说明文字。</summary>
+    public bool IsRemoteSync => _sync?.IsRemote == true;
+
+    /// <summary>设置页登录/登出后调用：让运行中的同步客户端重读配置，立即生效。</summary>
+    public void RefreshSyncConfig() => _sync?.RefreshConfig();
+
+    /// <summary>设置页登出时调用：清掉缓存 token，下一次同步不再带旧凭据。</summary>
+    public void ClearSyncToken() => _sync?.ClearToken();
+
+    /// <summary>设置页「同步服务器」预填的地址：.env 里有就用，没有就用出厂默认。</summary>
+    public static string RemoteUrl =>
+        EnvFile.Get(RemoteConfig.UrlKey) is { Length: > 0 } url ? url : RemoteConfig.DefaultUrl;
+
+    /// <summary>设置页「同步服务器」预填的用户名（密码不回显）。</summary>
+    public static string RemoteUserName => EnvFile.Get(RemoteConfig.UserKey) ?? string.Empty;
+
     // ---------------- 详情 / 表单 ----------------
 
     [ObservableProperty] private TaskViewModel? _selectedTask;
@@ -291,6 +368,9 @@ public sealed partial class MainViewModel : ObservableObject
     public bool IsFocusView => Mode == ViewMode.Focus;
     public bool IsScheduleView => Mode == ViewMode.Schedule;
 
+    /// <summary>便签页：与任务、课表分开的一整页，左边列表右边正文。</summary>
+    public bool IsNotesView => Mode == ViewMode.Notes;
+
     /// <summary>周视图同样使用分组列表，只是每天一组。</summary>
     public bool IsGroupedView => IsListView || IsWeekView;
 
@@ -300,6 +380,7 @@ public sealed partial class MainViewModel : ObservableObject
     public bool IsYearSegment => Mode == ViewMode.Year;
     public bool IsFocusSegment => Mode == ViewMode.Focus;
     public bool IsScheduleSegment => Mode == ViewMode.Schedule;
+    public bool IsNotesSegment => Mode == ViewMode.Notes;
 
     public bool IsTodayActive => Mode == ViewMode.Today;
     public bool IsAllActive => Mode == ViewMode.All;
@@ -405,6 +486,14 @@ public sealed partial class MainViewModel : ObservableObject
     private void ShowScheduleSegment()
     {
         Mode = ViewMode.Schedule;
+        Load();
+    }
+
+    /// <summary>便签分段：只加载便签列表，不动任务分组。</summary>
+    [RelayCommand]
+    private void ShowNotesSegment()
+    {
+        Mode = ViewMode.Notes;
         Load();
     }
 
@@ -819,41 +908,282 @@ public sealed partial class MainViewModel : ObservableObject
 
         if (!await HasAccountAsync())
         {
+            // 两种模式都能在设置页配账号：远程填服务器账号，本机填本机账号
+            if (_sync.IsRemote)
+            {
+                SyncText = "还没登录服务器：在「设置 → 同步服务器」里填地址和账号";
+                AccountRequired?.Invoke();
+                return;
+            }
+
             SyncText = "还没有设置同步账号";
             AccountRequired?.Invoke();
             return;
         }
 
+        // 换账号 = 换一份数据：清空本地、改从新账号全量拉取。清空不可撤销，必须先问过用户
+        if (_sync.HasAccountChanged && _sync.IsRemote)
+        {
+            var question =
+                "检测到同步账号已更换。\n\n" +
+                "继续同步会先清空这台电脑上的全部待办，再导入新账号的云端数据；\n" +
+                "本地闹钟、课表和设置不受影响。此操作不可撤销。";
+
+            if (ConfirmAccountSwitch?.Invoke(question) != true)
+            {
+                SyncText = "已取消：换账号需要先清空本地数据";
+                Toast(SyncToastInfo.Error("已取消：换账号要先清空本地数据"));
+                return;
+            }
+
+            try
+            {
+                // 先登录新账号，成功后才清空本地：失败时本地数据保持原样
+                await _sync.ApplyAccountSwitchAsync();
+            }
+            catch (Exception ex)
+            {
+                SyncText = $"没换成账号：{ex.Message}（本地数据未改动）";
+                Toast(SyncToastInfo.Error($"没换成账号：{ex.Message}"));
+                return;
+            }
+        }
+
         SyncText = "正在同步…";
+        Toast(SyncToastInfo.Working());
         try
         {
             // 一次往返：把本地改动推上去，同时把另一端的新改动拉回来
             var stats = await _sync.SyncAsync();
-            SyncText = stats.Pulled == 0 && stats.Rejected == 0
-                ? $"已同步 · 上传 {stats.Accepted} 条 · {DateTime.Now:HH:mm}"
-                : $"已同步 · 上传 {stats.Accepted} / 拉取 {stats.Pulled} 条 · {DateTime.Now:HH:mm}";
+
+            // 手机端改过闹钟开关 / 删过闹钟：让「专注 → 闹钟」列表重新读一遍
+            if (stats.AlarmsUpdated > 0) _alarms?.NotifyChanged();
+
+            // 便签两端都能改，拉回来直接重读列表；正在编辑的那条会被 FlushNote 先落盘再重载
+            if (stats.NotesChanged > 0) LoadNotes();
+
+            var alarmNote = stats.AlarmsUpdated > 0 ? $" · 闹钟 {stats.AlarmsUpdated} 项变化" : string.Empty;
+            var noteNote = stats.NotesChanged > 0 ? $" · 便签 {stats.NotesChanged} 条更新" : string.Empty;
+            SyncText = stats.AccountSwitched
+                ? $"已切换账号：本地旧数据已清空，导入新账号 {stats.Pulled} 条 · {DateTime.Now:HH:mm}"
+                : stats.Pulled == 0 && stats.Rejected == 0
+                    ? $"已同步 · 上传 {stats.Accepted} 条{alarmNote}{noteNote} · {DateTime.Now:HH:mm}"
+                    : $"已同步 · 上传 {stats.Accepted} / 拉取 {stats.Pulled} 条{alarmNote}{noteNote} · {DateTime.Now:HH:mm}";
+
+            // 浮层只报两件事：上传了几条、下载了几条；闹钟 / 便签的变化挂在下面一行小字
+            var toastExtra = (alarmNote + noteNote).TrimStart(' ', '·').Trim();
+            Toast(SyncToastInfo.Success(
+                stats.Accepted, stats.Pulled, toastExtra.Length == 0 ? null : toastExtra));
+
             Load();
         }
         catch (Exception ex)
         {
             SyncText = $"同步失败：{ex.Message}";
+            Toast(SyncToastInfo.Error($"同步失败：{ex.Message}"));
         }
     }
 
-    /// <summary>同步前确认电脑上已经有账号；数据库连不上时不当作「没账号」，让真正的错误显示出来。</summary>
-    private static async Task<bool> HasAccountAsync()
+    /// <summary>同步前确认账号可用：远程模式看 .env 有没有填服务器账号，单机模式看本机有没有设过账号。</summary>
+    private async Task<bool> HasAccountAsync()
     {
+        if (_sync?.IsRemote == true) return _sync.HasCredentials;
+
         var users = UserStore.Create();
-        if (users is null) return false;
 
         try
         {
-            return !string.IsNullOrWhiteSpace(await users.GetNameAsync());
+            return await users.CountAsync() > 0;
         }
         catch
         {
             return true;
         }
+    }
+
+    // ---------------- 便签 ----------------
+
+    /// <summary>便签列表：置顶在前，其余按最近修改排。</summary>
+    public ObservableCollection<NoteViewModel> Notes { get; } = [];
+
+    /// <summary>当前正在编辑的那一条。切换 / 新建 / 删除前必须先落盘，否则改到一半的文字会丢。</summary>
+    [ObservableProperty] private NoteViewModel? _selectedNote;
+
+    [ObservableProperty] private string _noteTitle = string.Empty;
+    [ObservableProperty] private string _noteBody = string.Empty;
+    [ObservableProperty] private bool _notePinned;
+    [ObservableProperty] private string _noteStamp = string.Empty;
+
+    /// <summary>正在把某条便签的字段灌进编辑框：此时不触发保存，否则会把旧值写回去。</summary>
+    private bool _loadingNote;
+
+    /// <summary>编辑框背后的原对象。保存时改的是它，不依赖 SelectedNote（选择已经切走了）。</summary>
+    private NoteItem? _activeNote;
+
+    /// <summary>停止输入 0.6 秒后落盘，避免每敲一个字都写一次 SQLite。</summary>
+    private readonly DispatcherTimer _noteSaveTimer;
+
+    /// <summary>新建便签后由界面把光标移进正文，省一次点击。</summary>
+    public event Action? NoteEditorFocusRequested;
+
+    /// <summary>便签为空时列表里的第一行提示。</summary>
+    public bool HasNotes => Notes.Count > 0;
+
+    /// <summary>选中便签的正文两行预览，列表里显示。</summary>
+    public bool HasSelectedNote => SelectedNote is not null;
+
+    partial void OnNoteTitleChanged(string value) => QueueNoteSave();
+
+    partial void OnNoteBodyChanged(string value) => QueueNoteSave();
+
+    partial void OnNotePinnedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(NotePinText));
+        QueueNoteSave();
+    }
+
+    public string NotePinText => NotePinned ? "取消置顶" : "置顶";
+
+    partial void OnSelectedNoteChanged(NoteViewModel? value)
+    {
+        // 先把上一条存掉：此刻 NoteTitle / NoteBody 仍是上一条的内容
+        if (!_loadingNote) FlushNote();
+
+        _loadingNote = true;
+        _activeNote = value?.Model;
+        NoteTitle = _activeNote?.Title ?? string.Empty;
+        NoteBody = _activeNote?.Body ?? string.Empty;
+        NotePinned = _activeNote?.Pinned ?? false;
+        NoteStamp = StampOf(_activeNote);
+        _loadingNote = false;
+
+        _noteSaveTimer.Stop();
+        OnPropertyChanged(nameof(HasSelectedNote));
+    }
+
+    private void QueueNoteSave()
+    {
+        if (_loadingNote) return;
+
+        _noteSaveTimer.Stop();
+        _noteSaveTimer.Start();
+    }
+
+    /// <summary>把编辑框里的内容写回当前便签；内容没变就跳过，避免无意义地刷新 modified 时间。</summary>
+    private void FlushNote()
+    {
+        if (_activeNote is not { } note) return;
+
+        var title = NoteTitle;
+        var body = NoteBody;
+        var pinned = NotePinned;
+        if (note.Title == title && note.Body == body && note.Pinned == pinned) return;
+
+        note.Title = title;
+        note.Body = body;
+        note.Pinned = pinned;
+        note.Touch();
+        _store.UpsertNote(note);
+
+        NoteStamp = StampOf(note);
+        SelectedNote?.Refresh();
+    }
+
+    /// <summary>从库里整表重读列表，尽量保住当前选中项。</summary>
+    public void LoadNotes()
+    {
+        var keep = _activeNote?.Id;
+
+        _loadingNote = true;
+        Notes.Clear();
+        foreach (var item in _store.GetNotes()) Notes.Add(new NoteViewModel(item));
+
+        var target = Notes.FirstOrDefault(n => n.Model.Id == keep) ?? Notes.FirstOrDefault();
+        if (!ReferenceEquals(SelectedNote, target)) SelectedNote = target;
+        _loadingNote = false;
+
+        OnPropertyChanged(nameof(HasNotes));
+        OnPropertyChanged(nameof(HasSelectedNote));
+        UpdateHeader();
+    }
+
+    [RelayCommand]
+    private void NewNote()
+    {
+        _noteSaveTimer.Stop();
+        FlushNote();
+
+        var note = new NoteItem();
+        note.Touch();
+        _store.UpsertNote(note);
+
+        LoadNotes();
+        SelectedNote = Notes.FirstOrDefault(n => n.Model.Id == note.Id);
+        NoteEditorFocusRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private void DeleteNote()
+    {
+        if (SelectedNote?.Model is not { } note) return;
+
+        _noteSaveTimer.Stop();
+
+        // 编辑框里可能还有没落盘的改动，先按墓碑一起写掉，别让它们在下一次 flush 时把删除撤销了
+        note.Deleted = true;
+        note.Title = NoteTitle;
+        note.Body = NoteBody;
+        note.Touch();
+        _store.UpsertNote(note);
+
+        _activeNote = null;
+        SelectedNote = null;
+        LoadNotes();
+    }
+
+    [RelayCommand]
+    private void TogglePinNote()
+    {
+        if (SelectedNote?.Model is not { } note) return;
+
+        _noteSaveTimer.Stop();
+        FlushNote();
+
+        note.Pinned = !note.Pinned;
+        note.Touch();
+        _store.UpsertNote(note);
+
+        LoadNotes();
+    }
+
+    /// <summary>把当前便签正文复制到剪贴板，方便贴进别的应用。</summary>
+    [RelayCommand]
+    private void CopyNote()
+    {
+        var text = string.IsNullOrWhiteSpace(NoteTitle) ? NoteBody : $"{NoteTitle}\n\n{NoteBody}";
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+            SyncText = "便签已复制到剪贴板";
+        }
+        catch (Exception ex)
+        {
+            SyncText = $"复制失败：{ex.Message}";
+        }
+    }
+
+    private static string StampOf(NoteItem? note)
+    {
+        if (note is null || note.UpdatedAt <= 0) return string.Empty;
+
+        var local = DateTimeOffset.FromUnixTimeMilliseconds(note.UpdatedAt).ToLocalTime();
+        return local.Date == DateTime.Today
+            ? $"今天 {local:HH:mm}"
+            : local.Year == DateTime.Today.Year
+                ? local.ToString("M月d日 HH:mm")
+                : local.ToString("yyyy年M月d日");
     }
 
     // ---------------- 加载与构建 ----------------
@@ -937,6 +1267,15 @@ public sealed partial class MainViewModel : ObservableObject
             IsEmpty = false;
             _groupsKeyMode = null;
         }
+        else if (Mode == ViewMode.Notes)
+        {
+            // 便签是独立一页，任务计数与空态都不参与
+            Groups.Clear();
+            TimelineGroups.Clear();
+            IsEmpty = false;
+            _groupsKeyMode = null;
+            LoadNotes();
+        }
         else if (Mode == ViewMode.Week)
         {
             if (signature != _weekSignature || SelectedDate.Date != _weekKeyDate)
@@ -995,6 +1334,7 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsYearView));
         OnPropertyChanged(nameof(IsFocusView));
         OnPropertyChanged(nameof(IsScheduleView));
+        OnPropertyChanged(nameof(IsNotesView));
         OnPropertyChanged(nameof(IsGroupedView));
         OnPropertyChanged(nameof(IsDaySegment));
         OnPropertyChanged(nameof(IsWeekSegment));
@@ -1002,6 +1342,7 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsYearSegment));
         OnPropertyChanged(nameof(IsFocusSegment));
         OnPropertyChanged(nameof(IsScheduleSegment));
+        OnPropertyChanged(nameof(IsNotesSegment));
         OnPropertyChanged(nameof(IsTodayActive));
         OnPropertyChanged(nameof(IsAllActive));
         OnPropertyChanged(nameof(IsDoneActive));
@@ -1179,7 +1520,8 @@ public sealed partial class MainViewModel : ObservableObject
 
         TimelineGroups.Clear();
 
-        void Add(string header, IEnumerable<TaskItem> source, string brush, string emptyHint = "")
+        void Add(string header, IEnumerable<TaskItem> source, string brush, string emptyHint = "",
+            int collapseOver = int.MaxValue)
         {
             var items = source
                 .OrderBy(t => t.AnchorAt ?? long.MaxValue)
@@ -1189,17 +1531,24 @@ public sealed partial class MainViewModel : ObservableObject
 
             if (items.Count == 0 && emptyHint.Length == 0) return;
 
+            // 条目太多就默认折起来：日视图一进来先看见时间轴，而不是一屏待勾选的逾期
+            var collapsible = items.Count > collapseOver;
+
             TimelineGroups.Add(new TaskGroup
             {
                 Header = header,
                 HeaderBrushKey = brush,
                 Items = items,
-                EmptyHint = emptyHint
+                EmptyHint = emptyHint,
+                CanCollapse = collapsible,
+                IsCollapsed = collapsible
             });
         }
 
-        // 今天视图保留「逾期」入口，否则逾期任务在日视图里就看不到了
-        if (Mode == ViewMode.Today) Add("逾期", visible.Where(t => !t.Done && IsOverdue(t)), "danger");
+        // 今天视图保留「逾期」入口，否则逾期任务在日视图里就看不到了。
+        // 超过 4 条就折叠——逾期攒到几十条时，展开着会把时间轴整个顶出首屏。
+        if (Mode == ViewMode.Today)
+            Add("逾期", visible.Where(t => !t.Done && IsOverdue(t)), "danger", collapseOver: 4);
 
         var dayTasks = visible.Where(t => LocalDateOf(t) == date).ToList();
 
@@ -1557,6 +1906,11 @@ public sealed partial class MainViewModel : ObservableObject
             case ViewMode.Schedule:
                 MainTitle = "课表";
                 MainSubtitle = $"{Schedule.Term} · 第 1 周 {Schedule.Week1Monday} · 共 {Schedule.EventsCount} 节课";
+                break;
+
+            case ViewMode.Notes:
+                MainTitle = "便签";
+                MainSubtitle = Notes.Count == 0 ? "随手记一段，双端同步" : $"{Notes.Count} 条 · 手机与电脑共享";
                 break;
         }
     }

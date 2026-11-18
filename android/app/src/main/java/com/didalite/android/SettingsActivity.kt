@@ -31,6 +31,7 @@ class SettingsActivity : Activity() {
     private lateinit var loginBtn: TextView
     private lateinit var loginSlot: LinearLayout
     private lateinit var stateView: TextView
+    private lateinit var diagView: TextView
     private lateinit var notifState: TextView
     private lateinit var exactState: TextView
     private lateinit var batteryState: TextView
@@ -38,16 +39,29 @@ class SettingsActivity : Activity() {
     private lateinit var calendarState: TextView
     private val permButtons = HashMap<TextView, TextView>()
 
+    /** 从首页因「登录失效」跳进来：账号已保留，只需要补密码。 */
+    private var reauth = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         db = Db(this)
+        reauth = intent?.getBooleanExtra("reauth", false) == true
         setContentView(buildUi())
         applyDidaTheme()
 
-        urlInput.setText(db.getMeta("server_url") ?: "")
+        urlInput.setText(db.getMeta("server_url") ?: Api.DefaultServerUrl)
         nameInput.setText(db.getMeta("user") ?: "")
         refreshState()
         refreshPermissions()
+
+        // 失效补密码：光标直接落到密码框，省一次点击
+        if (reauth) {
+            pwdInput.requestFocus()
+            pwdInput.post {
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                imm.showSoftInput(pwdInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
     }
 
     override fun onResume() {
@@ -86,7 +100,7 @@ class SettingsActivity : Activity() {
         root.addView(stateView)
 
         root.addView(label("服务器地址"))
-        urlInput = input("如 192.168.1.5:5080", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        urlInput = input("已预填服务器，也可改成 192.168.1.5:5080", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         root.addView(urlInput)
 
         root.addView(label("用户名"))
@@ -99,6 +113,19 @@ class SettingsActivity : Activity() {
 
         loginSlot = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(loginSlot, fullWidth(topMargin = 16))
+
+        root.addView(pill("检查连接", small = true).apply {
+            setOnClickListener { runCheck() }
+        }, fullWidth(topMargin = 10))
+
+        diagView = TextView(this).apply {
+            textSize = 12f
+            typeface = Ui.body
+            setTextColor(Ui.MUTED)
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(0, dp(10), 0, 0)
+        }
+        root.addView(diagView)
 
         root.addView(pageRule(topMargin = 26))
 
@@ -215,17 +242,24 @@ class SettingsActivity : Activity() {
 
     private fun refreshState() {
         val logged = db.getMeta("token") != null
+        val known = db.getMeta("user") ?: ""
         nameInput.isEnabled = !logged
         pwdInput.isEnabled = !logged
         urlInput.isEnabled = !logged
-        stateView.text = if (logged) {
-            "已登入：" + (db.getMeta("user") ?: "")
-        } else {
-            "未登入 · 填好地址和账号后点「登入」"
+        stateView.text = when {
+            logged -> "已登入：" + known
+            known.isNotEmpty() -> "未登入：账号 $known 已保留，输入密码就能重新登入"
+            else -> "未登入 · 填好地址和账号后点「登入」"
         }
+        stateView.setTextColor(if (logged) Ui.MUTED else if (known.isNotEmpty()) Ui.WARN else Ui.MUTED)
 
         loginSlot.removeAllViews()
-        loginBtn = pill(if (logged) "登出" else "登入", primary = !logged).apply {
+        val label = when {
+            logged -> "登出"
+            known.isNotEmpty() -> "恢复登入"
+            else -> "登入"
+        }
+        loginBtn = pill(label, primary = !logged).apply {
             setOnClickListener { if (db.getMeta("token") == null) doLogin() else doLogout() }
         }
         loginSlot.addView(
@@ -274,13 +308,40 @@ class SettingsActivity : Activity() {
             toast("地址、用户名、密码都要填")
             return
         }
+
+        // 换账号 = 换一份数据：旧账号的任务会原样推给新账号，必须先清干净。
+        // 清空不可撤销，所以先问过用户再动手。
+        val previousUser = db.getMeta("user") ?: ""
+        val switching = previousUser.isNotEmpty() && !previousUser.equals(name, ignoreCase = true)
+        val localCount = db.all().size + db.notes().size
+        if (switching && localCount > 0) {
+            AlertDialog.Builder(this)
+                .setTitle("换成另一个账号？")
+                .setMessage(
+                    "账号从「$previousUser」换成「$name」。\n\n" +
+                        "这台手机上的 $localCount 条任务和便签会先清空，再从新账号导入云端数据。\n" +
+                        "本地闹钟、课表和提醒不受影响。此操作不可撤销。"
+                )
+                .setNegativeButton("取消", null)
+                .setPositiveButton("清空并换") { _, _ -> doLoginNow(base, name, password, true) }
+                .show()
+            return
+        }
+
+        doLoginNow(base, name, password, switching)
+    }
+
+    private fun doLoginNow(base: String, name: String, password: String, clearLocal: Boolean) {
         stateView.text = "登录中…"
         Thread {
             val message = try {
                 val token = Api.login(base, name, password)
+                // 先登录成功再清本地：登录失败时本地一个字节都不动
+                if (clearLocal) db.clearSyncedData()
                 db.setMeta("server_url", base)
                 db.setMeta("user", name)
                 db.setMeta("token", token)
+                reauth = false
                 "登入成功，回到首页就能同步"
             } catch (e: Exception) {
                 "失败：" + (e.message ?: e.javaClass.simpleName)
@@ -295,11 +356,45 @@ class SettingsActivity : Activity() {
     }
 
     private fun doLogout() {
+        // 只作废 token：账号和地址留着，下次登入不用重填用户名
         db.setMeta("token", null)
-        db.setMeta("user", null)
         pwdInput.setText("")
         refreshState()
-        toast("已登出，本地数据保留")
+        toast("已登出，账号已保留，下次输密码即可")
+    }
+
+    /**
+     * 连接自检：一次请求把「网络不通」「登录失效」「一切正常」分开。
+     * 这三种在同步结果里长得一模一样，混在一起就会一直误以为是掉线——
+     * 其实校园网挡 443 端口和服务器不认凭据完全是两回事。
+     */
+    private fun runCheck() {
+        val base = Api.normalize(urlInput.text.toString())
+        if (base.isEmpty()) {
+            showDiag("地址是空的，先填服务器地址", Ui.WARN)
+            return
+        }
+        val token = db.getMeta("token")
+        diagView.text = "正在检查…"
+        Thread {
+            val result = Api.checkConnection(base, token)
+            runOnUiThread {
+                when (result) {
+                    is Api.CheckResult.Ok -> showDiag(
+                        "一切正常：连上了，登录有效，云端有 ${result.taskCount} 条任务\n$base",
+                        Ui.INK_2
+                    )
+                    is Api.CheckResult.Unauthorized -> showDiag(result.message, Ui.WARN)
+                    is Api.CheckResult.Unreachable -> showDiag(result.message, Ui.WARN)
+                    is Api.CheckResult.ServerError -> showDiag("服务端报错：${result.message}", Ui.WARN)
+                }
+            }
+        }.start()
+    }
+
+    private fun showDiag(text: String, color: Int) {
+        diagView.text = text
+        diagView.setTextColor(color)
     }
 
     private fun readCalendar() {
@@ -312,8 +407,15 @@ class SettingsActivity : Activity() {
             val message = try {
                 val events = SystemCalendar.read(this)
                 val changed = SystemCalendar.importInto(db, events)
+                // 顺带核对日历里被删掉的事件，把对应任务标成删除，等同步推给电脑端
+                val cal = CalendarSync.scan(applicationContext, db)
                 ReminderScheduler.rescheduleAll(applicationContext)
-                "读到 ${events.size} 个日程，其中 $changed 条有变化"
+                val tail = when {
+                    cal.removed > 0 -> "，日历里删掉的 ${cal.removed} 条已标记删除"
+                    cal.note != null -> "（${cal.note}）"
+                    else -> ""
+                }
+                "读到 ${events.size} 个日程，其中 $changed 条有变化$tail"
             } catch (e: Exception) {
                 "失败：" + (e.message ?: e.javaClass.simpleName)
             }
@@ -330,7 +432,14 @@ class SettingsActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.WRITE_CALENDAR), REQ_CALENDAR_WRITE)
             return
         }
-        val list = CalendarWriter.writableCalendars(this)
+        // MIUI/HyperOS 的授权落库是异步的：授权弹窗刚确认完，provider 可能还没把权限算数，
+        // 立刻查询会撞 SecurityException 闪退。捕获后提示再点一次，不崩。
+        val list = try {
+            CalendarWriter.writableCalendars(this)
+        } catch (e: SecurityException) {
+            toast("日历权限刚授权还没生效，请稍等一下再点一次「写入日历」")
+            return
+        }
         if (list.isEmpty()) {
             toast("手机里没有可写的日历")
             return

@@ -1,0 +1,49 @@
+[Unit]
+Description=dida-sync (滴答同步服务)
+Documentation=file:/opt/dida-sync/README.md
+After=network-online.target
+Wants=network-online.target
+# 与服务器上其他服务（nginx 等）没有任何依赖关系，互不影响
+
+[Service]
+Type=simple
+User=dida-sync
+Group=dida-sync
+WorkingDirectory=/opt/dida-sync
+EnvironmentFile=/etc/dida-sync.env
+Environment=DOTNET_NOLOGO=1
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+ExecStart=/opt/dida-sync/dida-sync serve
+
+Restart=always
+RestartSec=3
+# 数据文件不给其他用户读（库里有待办内容）
+UMask=0077
+# 崩溃自动拉起，最多 5 次/10 秒，避免配置写错时疯狂重启
+StartLimitBurst=5
+StartLimitIntervalSec=10
+
+# 收紧权限：系统盘只读，只有数据目录可写
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/dida-sync
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+
+# 这个服务只处理少量 JSON 请求，256M 足够；顶到上限会被 OOM 杀掉再自动重启，
+# 不会拖垮同机的其他服务（尤其是只有 2G 内存的机器）
+MemoryMax=256M
+TasksMax=128
+
+# 日志交给 journald：journalctl -u dida-sync -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

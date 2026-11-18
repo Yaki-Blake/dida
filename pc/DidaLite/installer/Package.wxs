@@ -1,10 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <!-- 滴答桌面端安装包：按用户安装到 %LOCALAPPDATA%\Programs\Dida，不需要管理员权限 -->
+  <!--
+    滴答桌面端安装包
+
+    安装范围：按用户安装（Scope=perUser），全程不申请管理员权限。
+
+    向导是自己写的四页，不用官方 WixUI 的页面队列：
+      安装位置（选父文件夹，程序固定落进它下面的 Dida 子文件夹）
+        → 安装选项（桌面快捷方式 / 开机自启）
+        → 进度
+        → 完成
+
+    为什么不用 WixUI_InstallDir：它的页面队列里排着官方欢迎页、许可页、位置页，
+    位置页的「下一步」和确认页的 EndDialog 都会让引擎顺着队列继续，结果官方位置页
+    又冒出来一次（就是「一次安装问两次位置」）。整套自己写以后，队列里只有本文件
+    的三屏，跳到哪就是哪，不会有多余页面插进来。
+
+    两个勾选项决定「桌面快捷方式」「开机自启」装不装：勾选框直接绑公开属性，
+    组件用 Condition 读属性，安装阶段由引擎判定（ADDLOCAL 那条路在 UI 阶段太晚，
+    实测无效，已弃用）。
+  -->
   <Package Name="滴答"
            Manufacturer="DidaLite"
-           Version="0.2.0"
+           Version="0.3.9"
            Language="2052"
+           Codepage="936"
            Scope="perUser"
            UpgradeCode="C052EAF5-A735-4C57-831A-F819F7AFFFFB"
            Compressed="yes">
@@ -14,15 +34,41 @@
 
     <Icon Id="DidaIcon" SourceFile="stage\dida.exe" />
     <Property Id="ARPPRODUCTICON" Value="DidaIcon" />
-    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!--
+      用户选择的父文件夹。默认值由下面的目录树算出（当前用户目录 \Programs）：
+      任何机器都有这个路径、普通用户也有写权限，不弹提权，只有 C 盘的笔记本同样装得上。
+      这里只声明属性（Secure 让它跨越 UI / 执行序列传递），不要写 Value：
+      Property 表里写 [LocalAppDataFolder] 属于非法属性引用，WiX 会当字面量（WIX1077 / ICE48）。
+    -->
+    <Property Id="INSTALLROOT" Secure="yes" />
+
+    <!-- 两个可选项：桌面快捷方式默认勾上，开机自启默认不勾 -->
+    <Property Id="CREATE_DESKTOP_SHORTCUT" Value="1" Secure="yes" />
+    <Property Id="CREATE_STARTUP_ENTRY" Value="0" Secure="yes" />
 
     <Feature Id="Main" Title="滴答" Level="1">
       <ComponentGroupRef Id="PublishedFiles" />
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>
 
+    <!--
+      两个功能始终随主功能进入安装请求，装不装由内部组件的 Condition 决定
+      （勾选属性 = 1 才安装），所以勾选与否在这里就能准确落地。
+    -->
+    <Feature Id="DesktopShortcut" Title="桌面快捷方式" Level="1">
+      <ComponentRef Id="DesktopShortcutComponent" />
+    </Feature>
+    <Feature Id="StartupEntry" Title="开机自动启动" Level="1">
+      <ComponentRef Id="StartupEntryComponent" />
+    </Feature>
+
+    <!--
+      目录树：INSTALLROOT 是用户选的父文件夹（默认就是下面这个用户目录），
+      INSTALLFOLDER 固定叫 Dida 挂在它下面。所以安装结果永远是「<你选的目录>\Dida」。
+    -->
     <StandardDirectory Id="LocalAppDataFolder">
-      <Directory Id="ProgramsFolder" Name="Programs">
+      <Directory Id="INSTALLROOT" Name="Programs">
         <Directory Id="INSTALLFOLDER" Name="Dida" />
       </Directory>
     </StandardDirectory>
@@ -41,5 +87,201 @@
         </Component>
       </Directory>
     </StandardDirectory>
+
+    <!--
+      桌面快捷方式：勾选了才装（组件条件读 CREATE_DESKTOP_SHORTCUT），
+      键路径为 HKCU（按用户安装必须如此），卸载随组件一起清掉。
+    -->
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcutComponent" Guid="*" Condition="CREATE_DESKTOP_SHORTCUT = 1">
+        <Shortcut Id="DesktopShortcut"
+                  Name="滴答"
+                  Description="待办 · 闹钟 · 日历"
+                  Target="[INSTALLFOLDER]dida.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="DidaIcon" />
+        <RegistryValue Root="HKCU" Key="Software\DidaLite\Dida" Name="desktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!--
+      开机自动启动：与程序内「设置 → 开机自启」写的是同一个值名（DidaLite），
+      所以安装时勾选、装完在设置里关掉，两边不会打架。命令行带 tray 参数表示静默进托盘。
+    -->
+    <Component Id="StartupEntryComponent" Guid="*" Directory="INSTALLFOLDER" Condition="CREATE_STARTUP_ENTRY = 1">
+      <RegistryValue Root="HKCU"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="DidaLite"
+                     Type="string"
+                     Value="&quot;[INSTALLFOLDER]dida.exe&quot; --tray"
+                     KeyPath="yes" />
+    </Component>
+
+    <UI>
+      <!-- 界面字体：不依赖官方向导带来的样式表，自己声明一套（雅黑），
+           否则 ICE31 会报 TextStyle 表缺失 -->
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Microsoft YaHei" Size="9" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Microsoft YaHei" Size="10" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <!-- 第一页：安装位置（只编辑父目录，页面明写最终路径） -->
+      <Dialog Id="LocationDlg" Width="370" Height="270" Title="滴答 · 安装位置" NoMinimize="yes">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}安装位置" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="选择把「滴答」装在哪个文件夹下。" />
+
+        <Control Id="FolderLabel" Type="Text" X="20" Y="64" Width="330" Height="13" NoPrefix="yes"
+                 Text="父文件夹：" />
+        <Control Id="FolderEdit" Type="PathEdit" X="20" Y="80" Width="248" Height="18"
+                 Property="INSTALLROOT" />
+        <Control Id="BrowseBtn" Type="PushButton" X="274" Y="80" Width="58" Height="18" Text="浏览(&amp;B)...">
+          <Publish Property="_BrowseProperty" Value="INSTALLROOT" Order="1" />
+          <Publish Event="SpawnDialog" Value="BrowseDlg" Order="2" />
+        </Control>
+
+        <!-- 已删除「程序文件实际放在：[INSTALLROOT]Dida」这行：
+             它在对话框加载时固化为默认 C 盘路径，用户改选 D:\ 后不会刷新，
+             与实际安装位置（用户所选父文件夹\Dida）矛盾，容易误导。 -->
+
+        <Control Id="Note" Type="Text" X="20" Y="112" Width="330" Height="92" NoPrefix="yes"
+                 Text="选到这个父文件夹就够了，安装时会自动在里面建立 Dida 文件夹，几百个程序文件都收在这个子文件夹里，不会散落在你选的目录里。&#13;&#10;浏览窗口里只有「已经存在」的文件夹能点确定；要装到新文件夹，先在浏览窗口里用「新建文件夹」。" />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="上一步(&amp;B)" Disabled="yes" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="下一步(&amp;N)">
+          <!-- 先让引擎校验并记住这个目录（参数是目录属性名），再去选项页 -->
+          <Publish Event="SetTargetPath" Value="INSTALLROOT" Order="1" />
+          <Publish Event="NewDialog" Value="OptionsDlg" Order="2" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="取消">
+          <Publish Event="EndDialog" Value="Exit" Order="1" />
+        </Control>
+      </Dialog>
+
+      <!-- 第二页：两个勾选。点「安装」结束这一屏，引擎继续走队列里的进度页 -->
+      <Dialog Id="OptionsDlg" Width="370" Height="270" Title="滴答 · 安装选项" NoMinimize="yes">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}安装选项" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="装完就能用，这两项装好后也能在「设置」里改。" />
+
+        <Control Id="ShortcutLabel" Type="Text" X="20" Y="64" Width="330" Height="13" NoPrefix="yes"
+                 Text="快捷方式与启动：" />
+        <Control Id="DesktopCheckBox" Type="CheckBox" X="20" Y="86" Width="330" Height="17"
+                 Property="CREATE_DESKTOP_SHORTCUT" CheckBoxValue="1"
+                 Text="在桌面创建「滴答」快捷方式" />
+        <Control Id="StartupCheckBox" Type="CheckBox" X="20" Y="108" Width="330" Height="17"
+                 Property="CREATE_STARTUP_ENTRY" CheckBoxValue="1"
+                 Text="开机时自动启动（不弹窗，直接驻留托盘）" />
+
+        <Control Id="HintText" Type="Text" X="20" Y="140" Width="330" Height="52" NoPrefix="yes"
+                 Text="不勾开机自启，就只在双击图标时启动。开始菜单里的「滴答」快捷方式无论如何都会创建；卸载时会一并清掉这里生成的桌面快捷方式与启动项。" />
+
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="上一步(&amp;B)">
+          <Publish Event="NewDialog" Value="LocationDlg" Order="1" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="安装(&amp;I)">
+          <!-- 结束本屏，队列接着走进度页 → 执行安装 -->
+          <Publish Event="EndDialog" Value="Return" Order="1" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="取消">
+          <Publish Event="EndDialog" Value="Exit" Order="1" />
+        </Control>
+      </Dialog>
+
+      <!-- 第三页：进度。引擎在执行阶段显示它，装完自动切到完成页 -->
+      <Dialog Id="InstallProgressDlg" Width="370" Height="270" Title="滴答 · 正在安装" NoMinimize="yes" Modeless="yes">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}正在安装" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="正在把文件复制到你的电脑，请稍候。" />
+
+        <Control Id="StatusText" Type="Text" X="20" Y="80" Width="330" Height="14" NoPrefix="yes"
+                 Text="正在写入文件和设置…">
+          <Subscribe Event="ActionData" Attribute="Text" />
+        </Control>
+        <Control Id="ProgressBar" Type="ProgressBar" X="20" Y="102" Width="330" Height="11" ProgressBlocks="yes">
+          <Subscribe Event="ProgressReport" Attribute="Progress" />
+        </Control>
+        <Control Id="HintText" Type="Text" X="20" Y="128" Width="330" Height="40" NoPrefix="yes"
+                 Text="整个过程通常十几秒，请不要关闭这个窗口。" />
+
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="取消" Disabled="yes" />
+      </Dialog>
+
+      <!-- 第四页：完成 -->
+      <Dialog Id="DonePageDlg" Width="370" Height="270" Title="滴答 · 安装完成" NoMinimize="yes">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}安装完成" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="滴答 已经装好了。" />
+
+        <Control Id="DoneText" Type="Text" X="20" Y="70" Width="330" Height="60" NoPrefix="yes"
+                 Text="在开始菜单里可以找到「滴答」。桌面快捷方式与开机自启按你刚才的勾选处理，之后想改可以在软件的「设置」里调。" />
+        <Control Id="PathText" Type="Text" X="20" Y="140" Width="330" Height="40" NoPrefix="yes"
+                 Text="安装目录：[INSTALLFOLDER]" />
+
+        <Control Id="Finish" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="完成">
+          <Publish Event="EndDialog" Value="Exit" Order="1" />
+        </Control>
+      </Dialog>
+
+      <!-- 已经装过时：不再进安装流程，指路去卸载 -->
+      <Dialog Id="InstalledDlg" Width="370" Height="270" Title="滴答 · 已经安装" NoMinimize="yes">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}已经安装过了" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="320" Height="15"
+                 Transparent="yes" NoPrefix="yes" Text="这台电脑上已经装了「滴答」。" />
+
+        <Control Id="InfoText" Type="Text" X="20" Y="70" Width="330" Height="60" NoPrefix="yes"
+                 Text="要重新安装，请先到「设置 → 应用 → 已安装的应用」里把「滴答」卸载，然后再运行这个安装包。卸载时桌面快捷方式、开始菜单和开机自启会一起清掉。" />
+
+        <Control Id="OK" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Cancel="yes" Text="确定">
+          <Publish Event="EndDialog" Value="Exit" Order="1" />
+        </Control>
+      </Dialog>
+
+      <!--
+        「浏览」打开的 BrowseDlg 来自 WixUI 扩展，它在该扩展里只是一张界面外壳：
+        让「确定」真正生效的两条动作（SetTargetPath 校验目录、EndDialog 关闭）写在
+        WixUI_Common 里。我们整套向导自写、没有引入 WixUI_Common，于是这两条缺失，
+        表现就是点「确定」毫无反应、永远停在选择文件夹那一屏。这里补回去。
+      -->
+      <Publish Dialog="BrowseDlg" Control="OK" Event="SetTargetPath" Value="[_BrowseProperty]" Order="1" />
+      <Publish Dialog="BrowseDlg" Control="OK" Event="EndDialog" Value="Return" Order="2" />
+
+    </UI>
+
+    <InstallUISequence>
+      <!-- 全新安装从位置页进入；已安装时只提示去卸载，不重复走安装流程 -->
+      <Show Dialog="LocationDlg" After="CostFinalize" Condition="NOT Installed" />
+      <Show Dialog="InstalledDlg" After="CostFinalize" Condition="Installed" />
+      <!-- 进度页紧贴执行动作之前，装完由完成页收尾 -->
+      <Show Dialog="InstallProgressDlg" Before="ExecuteAction" />
+      <!-- 装完收尾；完成按钮用 Exit 结束队列，不会往下走到取消/失败页 -->
+      <Show Dialog="DonePageDlg" After="ExecuteAction" />
+      <!-- 这两屏由引擎在取消/失败时按名字直接调起，放进序列表只为满足 ICE20，
+           条件恒假保证它们不会自己排队冒出来 -->
+    </InstallUISequence>
   </Package>
 </Wix>

@@ -47,6 +47,26 @@
             android:exported="false"
             android:label="闹钟" />
 
+        <!-- 便签：exported=true 是为了让系统便签 / 备忘录「分享」时能选到滴答；
+             SEND_MULTIPLE 是批量收——一次分享多条文本，每条各落一条便签 -->
+        <activity
+            android:name=".NotesActivity"
+            android:exported="true"
+            android:label="便签"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".ReminderActivity"
             android:exported="false"

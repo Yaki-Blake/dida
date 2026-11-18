@@ -95,21 +95,49 @@
         <!-- 分组列表的一行：组标题 + 任务行 + 空提示 -->
         <DataTemplate x:Key="GroupRow">
             <StackPanel>
-                <TextBlock Text="{Binding Header}"
-                           Foreground="{Binding HeaderBrushKey, Converter={StaticResource BrushKey}}">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock" BasedOn="{StaticResource GroupHeader}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Text="{Binding Header}"
+                               Foreground="{Binding HeaderBrushKey, Converter={StaticResource BrushKey}}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource GroupHeader}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Header}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!-- 只有可折叠的分组（逾期条数多）才出现这个按钮 -->
+                    <Button Grid.Column="1"
+                            HorizontalAlignment="Left"
+                            Margin="4,0,0,0"
+                            Padding="4,0"
+                            Style="{StaticResource GhostButton}"
+                            Content="{Binding ToggleLabel}"
+                            FontSize="{StaticResource FontSize11}"
+                            Command="{Binding ToggleCollapseCommand}"
+                            Visibility="{Binding CanCollapse, Converter={StaticResource BoolToVis}}" />
+                </Grid>
+
+                <ItemsControl ItemsSource="{Binding Items}"
+                              ItemTemplate="{StaticResource TaskRow}">
+                    <ItemsControl.Style>
+                        <Style TargetType="ItemsControl">
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding Header}" Value="">
+                                <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
                                     <Setter Property="Visibility" Value="Collapsed" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
-                    </TextBlock.Style>
-                </TextBlock>
-
-                <ItemsControl ItemsSource="{Binding Items}"
-                              ItemTemplate="{StaticResource TaskRow}" />
+                    </ItemsControl.Style>
+                </ItemsControl>
 
                 <TextBlock Text="{Binding EmptyHint}" Margin="16,2,16,8">
                     <TextBlock.Style>
@@ -473,6 +501,15 @@
                         </Button.Style>
                     </Button>
 
+                    <!-- 一键完成：今天 / 全部视图先清逾期，其余视图清选中日。
+                         放在「日/周/月/年」段控左边，靠近标题那一侧 -->
+                    <Button Style="{StaticResource GhostButton}"
+                            Content="{Binding BulkDoneText}"
+                            Command="{Binding CompleteListedCommand}"
+                            Margin="0,0,8,0"
+                            Visibility="{Binding CanBulkDone, Converter={StaticResource BoolToVis}}"
+                            ToolTip="把逾期（或选中日）的未完成日程全部打勾，两秒内可撤销" />
+
                     <Border Background="{DynamicResource bg-surface}"
                             BorderBrush="{DynamicResource line}" BorderThickness="1"
                             CornerRadius="{StaticResource RadiusM}" Padding="2">
@@ -508,6 +545,11 @@
                                         Tag="{Binding IsFocusSegment}"
                                         CommandParameter="focus"
                                         Click="Segment_Click" />
+                                <Button x:Name="NotesSegmentButton"
+                                        Content="便签" Style="{StaticResource SegmentButton}"
+                                        Tag="{Binding IsNotesSegment}"
+                                        CommandParameter="notes"
+                                        Click="Segment_Click" />
                             </StackPanel>
 
                             <!-- 切换时从旧按钮飞向新按钮的绿色小圆点 -->
@@ -525,14 +567,6 @@
                             </Canvas>
                         </Grid>
                     </Border>
-
-                    <!-- 一键完成：今天 / 全部视图先清逾期，其余视图清选中日 -->
-                    <Button Style="{StaticResource GhostButton}"
-                            Content="{Binding BulkDoneText}"
-                            Command="{Binding CompleteListedCommand}"
-                            Margin="8,0,0,0"
-                            Visibility="{Binding CanBulkDone, Converter={StaticResource BoolToVis}}"
-                            ToolTip="把逾期（或选中日）的未完成日程全部打勾，两秒内可撤销" />
 
                     <Button Content="同步" Style="{StaticResource GhostButton}"
                             Command="{Binding SyncCommand}" Margin="8,0,0,0" />
@@ -648,6 +682,7 @@
                 <ContentControl x:Name="YearHost" Visibility="{Binding IsYearView, Converter={StaticResource BoolToVis}}" />
                 <ContentControl x:Name="FocusHost" Visibility="{Binding IsFocusView, Converter={StaticResource BoolToVis}}" />
                 <ContentControl x:Name="ScheduleHost" Visibility="{Binding IsScheduleView, Converter={StaticResource BoolToVis}}" />
+                <ContentControl x:Name="NotesHost" Visibility="{Binding IsNotesView, Converter={StaticResource BoolToVis}}" />
 
                 <!-- 空态（列表视图） -->
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
@@ -772,6 +807,14 @@
                 </StackPanel>
             </Grid>
         </Border>
+
+        <!-- 同步浮层：贴着右上角「同步 / 添加」下方往下排，绿底白字、底边走 4 秒进度条，
+             走完自己向上淡出；点一下立刻收起。位置对齐头部右边距（20） -->
+        <Canvas x:Name="SyncToastLayer"
+                Grid.ColumnSpan="4"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,62,20,0"
+                Panel.ZIndex="99" />
 
         <!-- 删除特效层：粒子画在全窗最上面，不吃鼠标 -->
         <Canvas x:Name="FxLayer"

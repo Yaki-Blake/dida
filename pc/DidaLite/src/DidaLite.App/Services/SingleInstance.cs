@@ -29,6 +29,29 @@ public static class SingleInstance
         }
     }
 
+    /// <summary>
+    /// 改完同步方式要重启自己：先把单实例锁放掉，否则新进程一启动就被判成「已有实例」然后退出。
+    /// 必须由抢锁的那个线程（UI 线程）调用。
+    /// </summary>
+    public static void Release()
+    {
+        if (_mutex is null) return;
+
+        try
+        {
+            _mutex.ReleaseMutex();
+        }
+        catch (ApplicationException)
+        {
+            // 不在持有锁的线程上，或本来就没持有：重启流程里不值得为此中断
+        }
+        finally
+        {
+            _mutex.Dispose();
+            _mutex = null;
+        }
+    }
+
     /// <summary>叫醒已有实例，让它把窗口显示出来。</summary>
     public static void WakeExisting()
     {

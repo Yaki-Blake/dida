@@ -8,7 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONArray
 
 /** 手机端本地库：结构对齐开发计划书 3.2，每端一份完整副本，断网也能看。 */
-class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.db", null, 3) {
+class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.db", null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -36,11 +36,32 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
         db.execSQL("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
         createCalendarLink(db)
         createAlarm(db)
+        createNote(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         createCalendarLink(db)
         createAlarm(db)
+        createNote(db)
+    }
+
+    /** 便签：手机与电脑共享，独立 rev 空间，游标用 note_cursor。 */
+    private fun createNote(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS note (
+              id          TEXT PRIMARY KEY,
+              title       TEXT NOT NULL DEFAULT '',
+              body        TEXT NOT NULL DEFAULT '',
+              pinned      INTEGER NOT NULL DEFAULT 0,
+              deleted     INTEGER NOT NULL DEFAULT 0,
+              updated_at  INTEGER NOT NULL,
+              rev         INTEGER NOT NULL DEFAULT 0,
+              dirty       INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_note_rev ON note(rev)")
     }
 
     /** 独立闹钟：只从电脑端「闹钟」页同步过来，手机端只读，不与任务混在一起。 */
@@ -93,6 +114,20 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
         writableDatabase.insertWithOnConflict(
             "task", null, task.toValues(dirty = false), SQLiteDatabase.CONFLICT_REPLACE
         )
+    }
+
+    /**
+     * 任务打墓碑：标删除 + 标待上传 + 刷新修改时间。
+     * rev 留着不动，等服务端裁决后发新的号回来。返回有没有真的删掉。
+     */
+    fun tombstone(id: String, now: Long): Boolean {
+        val task = find(id) ?: return false
+        if (task.deleted) return false
+        writableDatabase.execSQL(
+            "UPDATE task SET deleted = 1, dirty = 1, updated_at = ? WHERE id = ?",
+            arrayOf(now, id)
+        )
+        return true
     }
 
     /** accepted 之后清 dirty，但只有推送期间本地没再改过（updated_at 未变）才清。 */
@@ -203,6 +238,14 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
         .query("calendar_link", arrayOf("task_id", "event_id"), null, null, null, null, null)
         .use { c -> buildMap { while (c.moveToNext()) put(c.getString(0), c.getLong(1)) } }
 
+    /** 反过来查：这条日历事件对应哪条任务。 */
+    fun taskIdForEvent(eventId: Long): String? = readableDatabase
+        .query(
+            "calendar_link", arrayOf("task_id"), "event_id = ?",
+            arrayOf(eventId.toString()), null, null, null
+        )
+        .use { c -> if (c.moveToFirst()) c.getString(0) else null }
+
     fun linkCalendar(taskId: String, eventId: Long) {
         writableDatabase.insertWithOnConflict(
             "calendar_link", null,
@@ -235,6 +278,83 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
     fun cursor(): Long = getMeta("cursor")?.toLongOrNull() ?: 0L
 
     fun setCursor(rev: Long) = setMeta("cursor", rev.toString())
+
+    /**
+     * 换账号时清掉「从云端同步来的那些数据」，好让新账号的数据干净地填进来。
+     * 闹钟、课表链接、日程提醒是这台手机自己的，不跟着账号走，保留。
+     * 不清的话，旧账号的任务会原样推给新账号，两个人的数据搅在一起。
+     */
+    fun clearSyncedData() {
+        writableDatabase.delete("task", null, null)
+        writableDatabase.delete("note", null, null)
+        setMeta("cursor", null)
+        setMeta("note_cursor", null)
+        setMeta("alarm_ops", null)
+    }
+
+    // ---------- 便签 ----------
+
+    /** 未删除的便签：置顶在前，其余按最近修改。 */
+    fun notes(): List<Note> = readableDatabase
+        .query("note", null, "deleted = 0", null, null, null, "pinned DESC, updated_at DESC")
+        .use { c -> buildList<Note> { while (c.moveToNext()) add(c.toNote()) } }
+
+    fun dirtyNotes(): List<Note> = readableDatabase
+        .query("note", null, "dirty = 1", null, null, null, null)
+        .use { c -> buildList<Note> { while (c.moveToNext()) add(c.toNote()) } }
+
+    fun note(id: String): Note? = readableDatabase
+        .query("note", null, "id = ?", arrayOf(id), null, null, null)
+        .use { c -> if (c.moveToFirst()) c.toNote() else null }
+
+    fun saveNote(note: Note) {
+        writableDatabase.insertWithOnConflict(
+            "note", null, note.toValues(), SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    /** 服务端接受了这条：记下 rev 并清 dirty；推送途中又改过的（updated_at 变了）保持待上传。 */
+    fun markNoteSynced(id: String, rev: Long, sentUpdatedAt: Long?) {
+        if (sentUpdatedAt == null) return
+        writableDatabase.execSQL(
+            "UPDATE note SET rev = ?, dirty = 0 WHERE id = ? AND updated_at = ?",
+            arrayOf(rev, id, sentUpdatedAt)
+        )
+    }
+
+    /** 服务端版本比本地新才覆盖：便签两边都能改，不能让远端旧版本盖掉本地未推的改动。 */
+    fun applyServerNote(note: Note) {
+        val local = this.note(note.id)
+        if (local != null && local.updatedAt >= note.updatedAt) return
+        saveNote(note.copy(dirty = false))
+    }
+
+    /** 便签游标与任务的 cursor 分开存，两边发号互不影响。 */
+    fun noteCursor(): Long = getMeta("note_cursor")?.toLongOrNull() ?: 0L
+
+    fun setNoteCursor(rev: Long) = setMeta("note_cursor", rev.toString())
+
+    private fun Note.toValues() = ContentValues().apply {
+        put("id", id)
+        put("title", title)
+        put("body", body)
+        put("pinned", if (pinned) 1 else 0)
+        put("deleted", if (deleted) 1 else 0)
+        put("updated_at", updatedAt)
+        put("rev", rev)
+        put("dirty", if (dirty) 1 else 0)
+    }
+
+    private fun Cursor.toNote() = Note(
+        id = getString(getColumnIndexOrThrow("id")),
+        title = getStringOrNull("title") ?: "",
+        body = getStringOrNull("body") ?: "",
+        pinned = getInt(getColumnIndexOrThrow("pinned")) != 0,
+        deleted = getInt(getColumnIndexOrThrow("deleted")) != 0,
+        updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
+        rev = getLong(getColumnIndexOrThrow("rev")),
+        dirty = getInt(getColumnIndexOrThrow("dirty")) != 0,
+    )
 
     private fun Cursor.toTask() = Task(
         id = getString(getColumnIndexOrThrow("id")),

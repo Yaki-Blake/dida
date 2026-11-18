@@ -3,12 +3,16 @@
     <OutputName>dida</OutputName>
     <OutputType>Package</OutputType>
     <InstallerPlatform>x64</InstallerPlatform>
-    <!-- 按用户安装（%LOCALAPPDATA%），文件键路径不在 HKCU 下，忽略只在多用户场景才有意义的 ICE -->
-    <SuppressIces>ICE38;ICE43;ICE61;ICE64</SuppressIces>
+    <!-- 按用户安装（%LOCALAPPDATA%/自定义目录），文件键路径不在 HKCU 下；这些 ICE 只在多用户或按机器安装时才有意义 -->
+    <!-- ICE20 会要求把 FatalError/UserExit 这些内置对话窗塞进 UI 序列；它们由引擎按名字直接调起，不需要排队 -->
+    <SuppressIces>ICE17;ICE20;ICE38;ICE43;ICE61;ICE64;ICE91</SuppressIces>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="WixToolset.Heat" Version="6.0.2" />
+    <!-- 官方安装向导（安装位置页、确认页、进度页、完成页、取消与错误处理） -->
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+    <!-- 中文语言包 zh-CN.wxl 由 SDK 自动收集，不需要再显式列出 -->
     <!-- Heat 生成的 File 源路径以 SourceDir\ 开头，必须把 stage 目录登记为绑定路径 -->
     <BindPath Include="$(MSBuildThisFileDirectory)stage" />
     <HarvestDirectory Include="$(MSBuildThisFileDirectory)stage">

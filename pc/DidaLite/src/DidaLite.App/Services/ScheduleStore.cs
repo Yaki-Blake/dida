@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Text;
+using DidaLite.Core;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -96,10 +97,9 @@ public sealed class ScheduleStore
 
     private static ScheduleStore Load()
     {
-        var baseDir = AppContext.BaseDirectory;
         var data = new ScheduleFile();
 
-        if (Pick(baseDir, "schedule.json") is { } jsonPath)
+        if (Pick("schedule.json") is { } jsonPath)
         {
             try
             {
@@ -127,11 +127,11 @@ public sealed class ScheduleStore
             week1 = new DateOnly(2026, 9, 7);
         }
 
-        var ics = Pick(baseDir, "schedule.ics") is { } icsPath
+        var ics = Pick("schedule.ics") is { } icsPath
             ? File.ReadAllBytes(icsPath)
             : [];
 
-        var html = Pick(baseDir, "schedule_page.html") is { } htmlPath
+        var html = Pick("schedule_page.html") is { } htmlPath
             ? File.ReadAllText(htmlPath, Encoding.UTF8)
             : "<!doctype html><meta charset='utf-8'><title>课表</title><p>未找到 schedule_page.html</p>";
 
@@ -151,19 +151,11 @@ public sealed class ScheduleStore
     }
 
     /// <summary>exe 同目录优先，其次是随包附带的 Assets 目录。</summary>
-    private static string? Pick(string baseDir, string name)
-    {
-        foreach (var path in new[]
-                 {
-                     Path.Combine(baseDir, name),
-                     Path.Combine(baseDir, "Assets", name),
-                 })
-        {
-            if (File.Exists(path)) return path;
-        }
-
-        return null;
-    }
+    /// <summary>
+    /// 读取课表相关文件：先看用户数据目录（导入后的结果），
+    /// 再回落到 exe 同目录与 Assets（随包附带，或旧版本遗留）。
+    /// </summary>
+    private static string? Pick(string name) => DataPaths.FindReadable(name);
 
     /// <summary>今天的本地日期，格式 yyyy-MM-dd。</summary>
     public string Today => DateOnly.FromDateTime(DateTime.Now)
@@ -263,25 +255,15 @@ public static class ScheduleNotes
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static Dictionary<string, string> _notes = Load();
 
-    /// <summary>与 ScheduleImporter.Persist 同规则：exe 同目录已有文件就写那里，否则写 Assets。</summary>
-    public static string FilePath
-    {
-        get
-        {
-            var baseDir = AppContext.BaseDirectory;
-            var direct = Path.Combine(baseDir, "schedule_notes.json");
-            if (File.Exists(direct)) return direct;
-            var assets = Path.Combine(baseDir, "Assets");
-            return Path.Combine(Directory.Exists(assets) ? assets : baseDir, "schedule_notes.json");
-        }
-    }
+    /// <summary>写入位置固定在用户数据目录，和课表本体一致；读取时兼容 exe 同目录的旧文件。</summary>
+    public static string FilePath => DataPaths.Write("schedule_notes.json");
 
     private static Dictionary<string, string> Load()
     {
         try
         {
-            var path = FilePath;
-            if (!File.Exists(path)) return new Dictionary<string, string>(StringComparer.Ordinal);
+            if (DataPaths.FindReadable("schedule_notes.json") is not { } path)
+                return new Dictionary<string, string>(StringComparer.Ordinal);
             var file = JsonSerializer.Deserialize<NoteFile>(File.ReadAllText(path, Encoding.UTF8), JsonOptions);
             return file?.Notes is { } notes
                 ? new Dictionary<string, string>(notes, StringComparer.Ordinal)

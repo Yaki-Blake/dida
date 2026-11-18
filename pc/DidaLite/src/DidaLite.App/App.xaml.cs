@@ -1,3 +1,4 @@
+using System.IO;
 using System.Threading;
 using System.Windows;
 using DidaLite.App.Services;
@@ -7,6 +8,41 @@ namespace DidaLite.App;
 
 public partial class App : Application
 {
+    /// <summary>
+    /// 未处理异常落盘。界面闪退时用户说不清发生了什么，日志是唯一线索；
+    /// 写在数据目录而不是程序目录，装到只读位置也能记。
+    /// </summary>
+    public App()
+    {
+        DispatcherUnhandledException += (_, e) => LogCrash(e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            LogCrash(e.Exception);
+            e.SetObserved();
+        };
+    }
+
+    internal static string CrashLogPath => Path.Combine(EnvDir, "crash.log");
+
+    private static string EnvDir => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DidaLite");
+
+    private static void LogCrash(Exception? ex)
+    {
+        if (ex is null) return;
+
+        try
+        {
+            Directory.CreateDirectory(EnvDir);
+            File.AppendAllText(CrashLogPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}\n\n");
+        }
+        catch
+        {
+            // 记录失败不能再抛：本来就在异常路径上
+        }
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);

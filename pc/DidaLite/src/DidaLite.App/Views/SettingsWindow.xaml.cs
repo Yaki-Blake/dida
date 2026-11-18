@@ -2,12 +2,13 @@ using System.Windows;
 using System.Windows.Input;
 using DidaLite.App.Services;
 using DidaLite.App.ViewModels;
+using DidaLite.Core;
 using DidaLite.Data.Sync;
 
 namespace DidaLite.App.Views;
 
 /// <summary>
-/// 设置窗口：地址、账号、同步、快捷键、外观都在这里。
+/// 设置窗口：服务器登录、同步、快捷键、外观都在这里。
 /// 打开时是模态的；快捷键录制需要窗口自己拿到按键，所以捕获逻辑放在这个窗口。
 /// </summary>
 public partial class SettingsWindow : Window
@@ -15,8 +16,6 @@ public partial class SettingsWindow : Window
     private readonly MainViewModel _vm;
     private readonly Func<ModifierKeys, Key, bool> _applyHotkey;
     private readonly Func<bool, bool> _setHotkeyEnabled;
-    private readonly Action<string> _saveAddress;
-    private readonly UserStore? _users = UserStore.Create();
 
     private bool _capturingHotkey;
 
@@ -24,112 +23,154 @@ public partial class SettingsWindow : Window
     private string _effectiveHotkey;
 
     public SettingsWindow(MainViewModel vm, Func<ModifierKeys, Key, bool> applyHotkey,
-        Func<bool, bool> setHotkeyEnabled, Action<string> saveAddress)
+        Func<bool, bool> setHotkeyEnabled)
     {
         InitializeComponent();
 
         _vm = vm;
         _applyHotkey = applyHotkey;
         _setHotkeyEnabled = setHotkeyEnabled;
-        _saveAddress = saveAddress;
         _effectiveHotkey = vm.HotkeyText;
 
         DataContext = vm;
-        AddressBox.Text = vm.SyncAddress;
 
-        Loaded += OnLoaded;
+        // 地址和用户名回显；密码不回显（.env 里有明文，但没必要摊在界面上）
+        RemoteUrlBox.Text = MainViewModel.RemoteUrl;
+        RemoteUserBox.Text = MainViewModel.RemoteUserName;
+
+        RefreshLoginUi();
         PreviewKeyDown += OnPreviewKeyDown;
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// 是否已登录：远程模式下账号和密码都在就算已登录。
+    /// 密码不回显，所以用 .env 里是否有密码来判断，而不是看密码框。
+    /// </summary>
+    private bool IsLoggedIn =>
+        _vm.IsRemoteSync
+        && MainViewModel.RemoteUserName.Length > 0
+        && !string.IsNullOrWhiteSpace(EnvFile.Get(RemoteConfig.PasswordKey));
+
+    /// <summary>
+    /// 按登录态切换界面：已登录时只看得到服务器地址和账号，密码框收起、按钮变「登出」。
+    /// </summary>
+    private void RefreshLoginUi()
     {
-        if (_users is null)
-        {
-            UserStatus.Text = ".env 缺少 DIDA_DB_CONNECTION，无法读取账号";
-            return;
-        }
+        var loggedIn = IsLoggedIn;
 
-        try
-        {
-            var name = await _users.GetNameAsync();
-            UserNameBox.Text = name ?? string.Empty;
+        RemoteUrlBox.IsReadOnly = loggedIn;
+        RemoteUserBox.IsReadOnly = loggedIn;
+        PasswordLabel.Visibility = loggedIn ? Visibility.Collapsed : Visibility.Visible;
+        RemotePasswordBox.Visibility = loggedIn ? Visibility.Collapsed : Visibility.Visible;
+        LoginButton.Visibility = loggedIn ? Visibility.Collapsed : Visibility.Visible;
+        LogoutButton.Visibility = loggedIn ? Visibility.Visible : Visibility.Collapsed;
 
-            if (name is null)
-            {
-                UserStatus.Text = "还没有账号，设置后手机才能登录";
-                UserNameBox.Focus();
-            }
-            else
-            {
-                UserStatus.Text = string.Empty;
-            }
-        }
-        catch (Exception ex)
+        if (loggedIn)
         {
-            UserStatus.Text = $"读取失败：{ex.Message}（MySQL 启动了吗？）";
+            RemoteUrlBox.Text = MainViewModel.RemoteUrl;
+            RemoteUserBox.Text = MainViewModel.RemoteUserName;
+            RemotePasswordBox.Password = string.Empty;
+            ModeStatus.Text = $"已登录为 {MainViewModel.RemoteUserName}，可直接同步；换账号请先登出。";
+        }
+        else
+        {
+            RemotePasswordBox.Password = string.Empty;
+            ModeStatus.Text = ModeStatus.Text.Contains("登出") ? "已登出，请重新登录。" : ModeStatus.Text;
         }
     }
 
-    private void CopyAddress_Click(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// 「登录」：拿界面上现填的地址和账号真发一次 /login，成功才写 .env。
+    /// 把这步做实的好处是——地址填成网站首页、服务器没起、密码不对，
+    /// 都能当场看到具体原因，而不是等后台同步默默失败。
+    /// 配置只在启动时读，所以登录成功后问一句要不要重启。
+    /// </summary>
+    private async void Login_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(AddressBox.Text)) return;
-
-        Clipboard.SetText(AddressBox.Text);
-        AddressStatus.Text = "已复制";
-    }
-
-    private void SaveAddress_Click(object sender, RoutedEventArgs e)
-    {
-        var baseUrl = AddressBox.Text.Trim().TrimEnd('/');
-        if (baseUrl.EndsWith("/sync", StringComparison.OrdinalIgnoreCase)) baseUrl = baseUrl[..^5];
-
-        if (!baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-            && !baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        var raw = RemoteUrlBox.Text.Trim();
+        if (raw.Length == 0)
         {
-            AddressStatus.Text = "要以 http:// 开头，如 http://192.168.1.5:5080";
+            ModeStatus.Text = "请填服务器地址";
+            RemoteUrlBox.Focus();
             return;
         }
 
-        _saveAddress(baseUrl);
-        AddressBox.Text = baseUrl + "/sync";
-        AddressStatus.Text = "已保存";
-    }
-
-    private async void SaveUser_Click(object sender, RoutedEventArgs e)
-    {
-        if (_users is null)
+        var url = RemoteConfig.Normalize(raw);
+        // Normalize 会把「只写了 IP:端口」补成 http://，但补不出主机名，这种要挡住
+        if ((!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            || url.EndsWith("://", StringComparison.Ordinal))
         {
-            UserStatus.Text = ".env 缺少 DIDA_DB_CONNECTION，账号存不进数据库";
+            ModeStatus.Text = "地址要以 http:// 或 https:// 开头，并带上主机名";
+            RemoteUrlBox.Focus();
             return;
         }
 
-        var name = UserNameBox.Text.Trim();
+        var name = RemoteUserBox.Text.Trim();
         if (name.Length == 0)
         {
-            UserStatus.Text = "请填写用户名";
+            ModeStatus.Text = "请填用户名";
+            RemoteUserBox.Focus();
             return;
         }
 
-        var password = PasswordBox.Password;
-        if (password.Length < 6)
+        var password = RemotePasswordBox.Password;
+        if (password.Length == 0)
         {
-            UserStatus.Text = "密码至少 6 位";
+            ModeStatus.Text = "请填密码";
+            RemotePasswordBox.Focus();
             return;
         }
 
-        UserStatus.Text = "正在保存…";
+        var cfg = new RemoteConfig(url, name, password);
+
+        LoginButton.IsEnabled = false;
+        ModeStatus.Text = $"正在连接 {url} …";
         try
         {
-            var cleared = await _users.SaveAsync(name, password);
-            PasswordBox.Clear();
-            UserStatus.Text = cleared
-                ? "已保存；手机端用这个用户名和密码登录（改过密码，旧登录已失效）"
-                : "已保存；密码没变，手机端不用重新登录";
+            var result = await SyncClient.TestLoginAsync(cfg);
+
+            if (!result.Ok)
+            {
+                ModeStatus.Text = "登录失败：" + result.Message;
+                return;
+            }
+
+            EnvFile.Set(RemoteConfig.UrlKey, cfg.BaseUrl);
+            EnvFile.Set(RemoteConfig.UserKey, cfg.Name);
+            EnvFile.Set(RemoteConfig.PasswordKey, cfg.Password);
+
+            // 让运行中的同步客户端立即用上新账号，无需重启
+            _vm.RefreshSyncConfig();
+
+            RemoteUrlBox.Text = cfg.BaseUrl;
+            ModeStatus.Text = $"登录成功，已连 {cfg.BaseUrl}";
+            RefreshLoginUi();
         }
-        catch (Exception ex)
+        finally
         {
-            UserStatus.Text = $"保存失败：{ex.Message}（MySQL 启动了吗？）";
+            LoginButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>
+    /// 「登出」：清掉账号和密码，保留服务器地址。
+    /// 同时清掉缓存 token 并让同步客户端退回未登录态，立即生效、无需重启。
+    /// </summary>
+    private void Logout_Click(object sender, RoutedEventArgs e)
+    {
+        var url = MainViewModel.RemoteUrl;
+
+        EnvFile.Set(RemoteConfig.UserKey, string.Empty);
+        EnvFile.Set(RemoteConfig.PasswordKey, string.Empty);
+
+        _vm.ClearSyncToken();
+        _vm.RefreshSyncConfig();
+
+        RemoteUrlBox.Text = url;   // 服务器地址不清空
+        RemoteUserBox.Text = string.Empty;
+        RefreshLoginUi();
+        ModeStatus.Text = "已登出，服务器地址已保留；填账号密码即可重新登录。";
     }
 
     private void HotkeyButton_Click(object sender, RoutedEventArgs e)

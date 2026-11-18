@@ -66,11 +66,14 @@ class MainActivity : Activity() {
             typeface = Ui.display
             setTextColor(Ui.INK)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        titleRow.addView(pill("便签", small = true).apply {
+            setOnClickListener { startActivity(Intent(this@MainActivity, NotesActivity::class.java)) }
+        }, gapParams(start = 6))
         titleRow.addView(pill("闹钟", small = true).apply {
             setOnClickListener { startActivity(Intent(this@MainActivity, AlarmActivity::class.java)) }
         }, gapParams(start = 6))
         titleRow.addView(pill("设置", small = true).apply {
-            setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
+            setOnClickListener { openSettings() }
         }, gapParams(start = 6))
         column.addView(titleRow)
 
@@ -79,6 +82,7 @@ class MainActivity : Activity() {
             typeface = Ui.body
             setTextColor(Ui.INK_2)
             setPadding(0, dp(14), 0, 0)
+            setOnClickListener { openSettings() }
         }
         column.addView(statusView)
 
@@ -166,9 +170,15 @@ class MainActivity : Activity() {
         }
 
     private fun updateStatus() {
-        val logged = db.getMeta("token") != null
+        val token = db.getMeta("token")
         val name = db.getMeta("user") ?: ""
-        statusView.text = if (logged) "已登入：$name" else "未登入 · 点右上角「设置」"
+        // token 还在就说已登入；token 被服务端作废时账号仍留着，提示「输密码」而不是从头填账号
+        statusView.text = when {
+            token != null -> "已登入：$name"
+            name.isNotEmpty() -> "未登入：$name · 点这里输密码登入"
+            else -> "未登入 · 点右上角「设置」"
+        }
+        statusView.setTextColor(if (token != null) Ui.INK_2 else if (name.isNotEmpty()) Ui.WARN else Ui.MUTED)
         stampView.text = buildString {
             append("本地 ").append(db.all().size).append(" 条")
             lastSyncText()?.let { append(" · ").append(it).append(" 上次同步") }
@@ -199,16 +209,28 @@ class MainActivity : Activity() {
     private fun doUpload() {
         val (base, token) = session() ?: return
         runAsync("上传中") {
+            // 先看日历：手机里删掉的事件要变成墓碑，才能跟着这一轮推给电脑端
+            val cal = CalendarSync.scan(applicationContext, db)
             val dirty = db.dirty()
             val alarmOps = db.alarmOps()
-            if (dirty.isEmpty() && alarmOps.isEmpty()) {
-                return@runAsync Outcome("没有待上传的改动", emptyList())
+            val dirtyNotes = db.dirtyNotes()
+            if (dirty.isEmpty() && alarmOps.isEmpty() && dirtyNotes.isEmpty()) {
+                return@runAsync Outcome(
+                    if (cal.removed > 0) "日历里删掉的 ${cal.removed} 条没有要上传的改动"
+                    else "没有待上传的改动",
+                    emptyList()
+                )
             }
 
             val sentAt = dirty.associate { it.id to it.updatedAt }
-            // since 取极大值：服务端只回 accepted / rejected，不推任何任务，避免「仅上传」顺带改了本地
-            val payload = Api.push(base, token, Long.MAX_VALUE / 4, dirty, alarmOps)
+            val sentNoteAt = dirtyNotes.associate { it.id to it.updatedAt }
+            // since / note_since 取极大值：服务端只回 accepted，不推任何增量，避免「仅上传」顺带改了本地
+            val payload = Api.push(
+                base, token, Long.MAX_VALUE / 4, dirty, alarmOps,
+                notes = dirtyNotes, noteSince = Long.MAX_VALUE / 4,
+            )
             payload.accepted.forEach { (id, rev) -> db.markSynced(id, rev, sentAt[id]) }
+            payload.noteAccepted.forEach { (id, rev) -> db.markNoteSynced(id, rev, sentNoteAt[id]) }
             payload.rejected.forEach { db.applyServer(it) }
             db.clearAlarmOps()
 
@@ -220,11 +242,18 @@ class MainActivity : Activity() {
             if (alarmOps.isNotEmpty()) {
                 rows.add(ChangeRow("↑", "闹钟改动 ${alarmOps.size} 个", Ui.ACCENT_DEEP))
             }
+            if (dirtyNotes.isNotEmpty()) {
+                rows.add(ChangeRow("↑", "便签 ${payload.noteAccepted.size} 条", Ui.ACCENT_DEEP))
+            }
+            // 日历里删掉的日程：本地已打墓碑，这一轮推给电脑端
+            cal.titles.forEach { rows.add(ChangeRow("×", it, Ui.MUTED)) }
 
             ReminderScheduler.rescheduleAll(applicationContext)
             val alarmNote = if (alarmOps.isEmpty()) "" else "，闹钟改动 ${alarmOps.size} 个"
+            val noteNote = if (dirtyNotes.isEmpty()) "" else "，便签 ${payload.noteAccepted.size} 条"
+            val calNote = if (cal.removed > 0) "，日历删除 ${cal.removed} 条" else ""
             Outcome(
-                "上传 ${payload.accepted.size} 条$alarmNote，被拒 ${payload.rejected.size} 条（已改用电脑版本）",
+                "上传任务 ${payload.accepted.size} 条$calNote$alarmNote$noteNote，被拒 ${payload.rejected.size} 条（已改用电脑版本）",
                 rows,
             )
         }
@@ -233,11 +262,18 @@ class MainActivity : Activity() {
     private fun doDownload() {
         val (base, token) = session() ?: return
         runAsync("下载中") {
+            // 日历里删掉的日程先打上墓碑，「仅下载」不外传，等下一轮上传时推给电脑端
+            val cal = CalendarSync.scan(applicationContext, db)
             val beforeAlarms = db.alarms()
-            val payload = Api.pull(base, token, db.cursor())
+            val beforeNotes = db.notes().associate { it.id to it.updatedAt }
+            val payload = Api.pull(base, token, db.cursor(), db.noteCursor())
             payload.tasks.forEach { db.applyServer(it) }
             db.setCursor(payload.maxRev)
             db.replaceAlarms(payload.alarms)
+            payload.notes.forEach { db.applyServerNote(it) }
+            if (payload.noteMaxRev > 0) db.setNoteCursor(payload.noteMaxRev)
+
+            val noteChanges = changedCount(beforeNotes, db.notes().associate { it.id to it.updatedAt })
 
             val rows = payload.tasks.mapTo(mutableListOf()) { task ->
                 if (task.deleted) {
@@ -249,26 +285,48 @@ class MainActivity : Activity() {
             if (beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }) {
                 rows.add(ChangeRow("↓", "闹钟 ${payload.alarms.size} 个", Ui.INK_2))
             }
+            if (noteChanges > 0) {
+                rows.add(ChangeRow("↓", "便签 $noteChanges 条", Ui.INK_2))
+            }
+            cal.titles.forEach { rows.add(ChangeRow("×", it, Ui.MUTED)) }
             ReminderScheduler.rescheduleAll(applicationContext)
             writeCalendarQuietly()
-            Outcome(summaryForDownload(payload.tasks), rows)
+            val alarmChanged = beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }
+            Outcome(
+                summaryForDownload(payload.tasks, alarmChanged, payload.alarms.size, noteChanges) +
+                    if (cal.removed > 0) "，日历删除 ${cal.removed} 条待上传" else "",
+                rows,
+            )
         }
     }
 
     private fun doSync() {
         val (base, token) = session() ?: return
         runAsync("同步中") {
+            // 先扫日历：手机里删掉的事件变成墓碑，才能跟着这一轮推给电脑端，电脑端那边也就消失了
+            val cal = CalendarSync.scan(applicationContext, db)
             val dirty = db.dirty()
             val alarmOps = db.alarmOps()
+            val dirtyNotes = db.dirtyNotes()
             val sentAt = dirty.associate { it.id to it.updatedAt }
+            val sentNoteAt = dirtyNotes.associate { it.id to it.updatedAt }
             val beforeAlarms = db.alarms()
-            val payload = Api.push(base, token, db.cursor(), dirty, alarmOps)
+            val beforeNotes = db.notes().associate { it.id to it.updatedAt }
+            val payload = Api.push(
+                base, token, db.cursor(), dirty, alarmOps,
+                notes = dirtyNotes, noteSince = db.noteCursor(),
+            )
             payload.accepted.forEach { (id, rev) -> db.markSynced(id, rev, sentAt[id]) }
+            payload.noteAccepted.forEach { (id, rev) -> db.markNoteSynced(id, rev, sentNoteAt[id]) }
             payload.rejected.forEach { db.applyServer(it) }
             payload.tasks.forEach { db.applyServer(it) }
             db.setCursor(payload.maxRev)
             db.replaceAlarms(payload.alarms)
+            payload.notes.forEach { db.applyServerNote(it) }
+            if (payload.noteMaxRev > 0) db.setNoteCursor(payload.noteMaxRev)
             db.clearAlarmOps()
+
+            val noteChanges = changedCount(beforeNotes, db.notes().associate { it.id to it.updatedAt })
 
             val acceptedIds = payload.accepted.map { it.first }.toSet()
             val rows = mutableListOf<ChangeRow>()
@@ -276,6 +334,9 @@ class MainActivity : Activity() {
                 .forEach { rows.add(ChangeRow("↑", it.title, Ui.ACCENT_DEEP)) }
             if (alarmOps.isNotEmpty()) {
                 rows.add(ChangeRow("↑", "闹钟改动 ${alarmOps.size} 个", Ui.ACCENT_DEEP))
+            }
+            if (dirtyNotes.isNotEmpty()) {
+                rows.add(ChangeRow("↑", "便签 ${dirtyNotes.size} 条", Ui.ACCENT_DEEP))
             }
             payload.rejected.forEach { rows.add(ChangeRow("↺", it.title, Ui.WARN)) }
             payload.tasks.forEach { task ->
@@ -288,17 +349,34 @@ class MainActivity : Activity() {
             if (beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }) {
                 rows.add(ChangeRow("↓", "闹钟 ${payload.alarms.size} 个", Ui.INK_2))
             }
+            if (noteChanges > 0) {
+                rows.add(ChangeRow("↓", "便签 $noteChanges 条", Ui.INK_2))
+            }
+            cal.titles.forEach { rows.add(ChangeRow("×", it, Ui.MUTED)) }
 
             ReminderScheduler.rescheduleAll(applicationContext)
             writeCalendarQuietly()
             val deleted = payload.tasks.count { it.deleted }
-            Outcome(
-                "上传 ${payload.accepted.size} 条，下载 ${payload.tasks.size} 条" +
-                    if (deleted > 0) "（含删除 $deleted 条）" else "",
-                rows,
-            )
+            // 闹钟 / 便签 / 任务是三条独立通道：任务的 0 条不代表另外两条没同步，摘要里分开写清楚
+            val alarmChanged = beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }
+            val sb = StringBuilder("上传任务 ${payload.accepted.size} 条，下载任务 ${payload.tasks.size} 条")
+            if (deleted > 0) sb.append("（含删除 $deleted 条）")
+            if (cal.removed > 0) sb.append("，日历删除 ${cal.removed} 条")
+            if (alarmOps.isNotEmpty()) sb.append("，闹钟改动 ${alarmOps.size} 个")
+            if (alarmChanged) sb.append("，闹钟 ${payload.alarms.size} 个")
+            if (dirtyNotes.isNotEmpty() || noteChanges > 0) {
+                sb.append("，便签 上传 ${dirtyNotes.size} / 下载 $noteChanges 条")
+            }
+            val noChange = payload.accepted.isEmpty() && payload.tasks.isEmpty() &&
+                alarmOps.isEmpty() && !alarmChanged && payload.rejected.isEmpty() &&
+                dirtyNotes.isEmpty() && noteChanges == 0 && cal.removed == 0
+            Outcome(if (noChange) "已是最新，没有变化" else sb.toString(), rows)
         }
     }
+
+    /** 按 (id → updated_at) 的映射比较前后差异：新增、删除、改过都算一条。 */
+    private fun changedCount(before: Map<String, Long>, after: Map<String, Long>): Int =
+        (before.keys + after.keys).count { before[it] != after[it] }
 
     /** 同步完顺手把任务写进系统日历；没授权或没有可写日历就安静跳过。 */
     private fun writeCalendarQuietly() {
@@ -306,27 +384,47 @@ class MainActivity : Activity() {
         runCatching { CalendarWriter.sync(applicationContext, db) }
     }
 
-    private fun summaryForDownload(tasks: List<Task>): String {
+    private fun summaryForDownload(
+        tasks: List<Task>,
+        alarmChanged: Boolean,
+        alarmCount: Int,
+        noteChanges: Int,
+    ): String {
         val deleted = tasks.count { it.deleted }
-        return if (tasks.isEmpty()) {
-            "电脑上没有新改动"
-        } else {
-            "下载 ${tasks.size} 条" + if (deleted > 0) "（含删除 $deleted 条）" else ""
+        if (tasks.isEmpty() && !alarmChanged && noteChanges == 0) return "电脑上没有新改动"
+        val parts = mutableListOf<String>()
+        if (tasks.isNotEmpty()) {
+            parts += "下载任务 ${tasks.size} 条" + if (deleted > 0) "（含删除 $deleted 条）" else ""
         }
+        if (alarmChanged) parts += "闹钟 $alarmCount 个"
+        if (noteChanges > 0) parts += "便签 $noteChanges 条"
+        return parts.joinToString("，")
     }
 
     private fun session(): Pair<String, String>? {
-        val base = db.getMeta("server_url")?.let { Api.normalize(it) }
+        val base = Api.normalize(db.getMeta("server_url") ?: Api.DefaultServerUrl)
         if (base.isNullOrEmpty()) {
             summaryView.text = "先到「设置」里填服务器地址并登入"
             return null
         }
         val token = db.getMeta("token")
         if (token == null) {
-            summaryView.text = "先到「设置」里登入"
+            summaryView.text = if (!db.getMeta("user").isNullOrEmpty()) {
+                "未登入：账号还在，点上面的提示输密码即可"
+            } else {
+                "先到「设置」里登入"
+            }
             return null
         }
         return base to token
+    }
+
+    /** 去设置页；未登入但账号还在时带 reauth，进去直接补密码。 */
+    private fun openSettings() {
+        val lost = db.getMeta("token") == null && !db.getMeta("user").isNullOrEmpty()
+        startActivity(
+            Intent(this, SettingsActivity::class.java).putExtra("reauth", lost)
+        )
     }
 
     private fun runAsync(label: String, work: () -> Outcome) {
@@ -334,21 +432,32 @@ class MainActivity : Activity() {
         summaryView.text = "$label…"
         Thread {
             var done = false
+            var authLost = false
             val outcome = try {
                 work().also { done = true }
             } catch (e: Exception) {
-                Outcome("失败：" + describe(e), emptyList())
+                if (e is ApiException && e.code == 401) {
+                    // 服务端不认这枚 token：只作废 token，账号和服务器地址都留着，
+                    // 跳到设置页补个密码就能恢复，不用重填账号
+                    db.setMeta("token", null)
+                    authLost = true
+                    Outcome("登录已失效，正在打开登录页…", emptyList())
+                } else {
+                    Outcome("失败：" + describe(e), emptyList())
+                }
             }
             runOnUiThread {
                 setBusy(false)
                 summaryView.text = outcome.summary
-                summaryView.setTextColor(Ui.INK_2)
+                summaryView.setTextColor(if (authLost) Ui.WARN else Ui.INK_2)
                 renderChanges(outcome.rows)
                 if (done) {
                     db.setMeta("last_sync_at", System.currentTimeMillis().toString())
                     resultTime.text = "刚刚"
                 }
                 updateStatus()
+                // 留半秒让用户看清提示再跳，避免「点了没反应」的错觉
+                if (authLost) summaryView.postDelayed({ openSettings() }, 600)
             }
         }.start()
     }
@@ -404,8 +513,17 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * 失败原因翻译。这里最要紧的是把「网络不通」和「登录失效」分开：
+     * 前者是网络/地址问题，重登没用；后者才需要换凭据。
+     * 混成一句「failed to connect …」的话，用户只会以为掉线了。
+     */
     private fun describe(e: Exception): String = when (e) {
         is ApiException -> e.message ?: "HTTP ${e.code}"
+        is java.net.UnknownHostException -> "连不上服务器：地址写错了，或 DNS 不通（不是登录问题）"
+        is java.net.SocketTimeoutException -> "连不上服务器：超时了，网络不通或这个端口被挡了（不是登录问题）"
+        is java.net.ConnectException -> "连不上服务器：连接被拒绝，地址或端口不对（不是登录问题）"
+        is java.net.SocketException -> "连不上服务器：网络中断了（不是登录问题）"
         else -> e.message ?: e.javaClass.simpleName
     }
 

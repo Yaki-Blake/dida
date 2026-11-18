@@ -1,0 +1,34 @@
+# 可选：用 nginx 给 dida-sync 套一层 HTTPS
+#
+# 这个文件不会被执行、不会被 install.sh 自动应用。要用的话你自己复制过去，属于“你自己加一块”，
+# 与 dida-sync 无关，删掉这一块就回到原样，不会影响原有的网站配置。
+#
+# 步骤：
+#   1. cp nginx-dida.conf.example /etc/nginx/conf.d/dida.conf
+#   2. 把 server_name 改成你用来同步的域名，证书路径改成你已有的（certbot 签好的那份）
+#   3. sudo nginx -t          ← 必须通过，不通过就别 reload
+#   4. sudo systemctl reload nginx
+#   5. 打开 /etc/dida-sync.env 里的 DIDA_TRUST_PROXY=1，再 systemctl restart dida-sync
+#
+# 注意：域名解析到大陆服务器通常要求 ICP 备案；不想备案就继续用 IP:端口直连。
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name dida.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/dida.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/dida.example.com/privkey.pem;
+
+    # 同步接口没有大请求体，限小一点更安全
+    client_max_body_size 2m;
+
+    location / {
+        proxy_pass http://127.0.0.1:5081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+}

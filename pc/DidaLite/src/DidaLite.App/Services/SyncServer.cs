@@ -26,8 +26,8 @@ public sealed class SyncServer : IDisposable
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private readonly MySqlTaskStore _store;
-    private readonly UserStore _users;
+    private readonly ITaskStore _store;
+    private readonly IUserStore _users;
     private readonly LocalStore _local;
 
     private WebApplication? _app;
@@ -35,66 +35,87 @@ public sealed class SyncServer : IDisposable
     /// <summary>手机端可用的完整地址，如 http://192.168.1.5:5080/sync；取不到网络时为 null。</summary>
     public string? LanUrl { get; private set; }
 
-    private SyncServer(MySqlTaskStore store, UserStore users, LocalStore local)
+    private SyncServer(ITaskStore store, IUserStore users, LocalStore local)
     {
         _store = store;
         _users = users;
         _local = local;
     }
 
-    /// <summary>配置齐全才启动；缺 .env 或端口起不来时静默返回 null，本地功能不受影响。</summary>
-    public static SyncServer? Start(LocalStore local)
-    {
-        var connection = EnvFile.Get("DIDA_DB_CONNECTION");
-        if (string.IsNullOrWhiteSpace(connection)) return null;
+    /// <summary>权威库在 MySQL 上（true）还是本机 SQLite（false），界面据此换文案。</summary>
+    public bool UsesMySql { get; private init; }
 
-        var server = new SyncServer(new MySqlTaskStore(connection), new UserStore(connection), local);
-        return server.Run() ? server : null;
+    /// <summary>
+    /// 端口被占、Kestrel 起不来时静默返回 null，桌面功能不受影响。
+    /// 配了 MySQL 就把 MySQL 当权威库；没配就用本机 SQLite——装完即用，对方不需要数据库。
+    /// </summary>
+    /// <param name="serveTasks">
+    /// true：完整同步服务（/login、/sync + 课表），监听所有网卡，手机可连。
+    /// false：只服务课表与「同步助手」页，只监听回环地址。远程模式下待办走自建服务器，
+    ///        但课表是浏览器 ↔ 本机文件的事，跟服务器无关，不能跟着一起关掉。
+    /// </param>
+    public static SyncServer? Start(LocalStore local, bool serveTasks = true)
+    {
+        // 桌面端内嵌服务固定用本机 SQLite；多用户服务器版由 DidaLite.Sync 提供。
+        ITaskStore store = new LocalTaskStore(local.DbPath);
+        IUserStore users = new LocalUserStore(local.DbPath);
+
+        var server = new SyncServer(store, users, local);
+        return server.Run(serveTasks) ? server : null;
     }
 
-    private bool Run()
+    private bool Run(bool serveTasks)
     {
         try
         {
             var builder = WebApplication.CreateSlimBuilder();
             builder.Logging.ClearProviders();
-            // 监听所有网卡：本机走 127.0.0.1，手机走局域网 IP
-            builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(Port));
+            builder.WebHost.ConfigureKestrel(options =>
+            {
+                // 完整模式监听所有网卡：本机走 127.0.0.1，手机走局域网 IP。
+                // 只服务课表时只绑回环——远程模式下手机已经不走这台电脑了，没必要暴露到局域网。
+                if (serveTasks) options.ListenAnyIP(Port);
+                else options.ListenLocalhost(Port);
+            });
 
             var app = builder.Build();
 
-            // 鉴权：本机请求直接放行（PC 自己就是服务端）；手机必须带登录换到的 token。
-            app.Use(async (ctx, next) =>
+            if (serveTasks)
             {
-                // /api/health 不含数据，和 /login 一样免鉴权，便于外部探活
-                if (IsLoopback(ctx.Connection.RemoteIpAddress)
-                    || ctx.Request.Path == "/login"
-                    || ctx.Request.Path == "/api/health")
+                // 鉴权：本机请求直接放行（PC 自己就是服务端）；手机必须带登录换到的 token。
+                app.Use(async (ctx, next) =>
                 {
+                    // /api/health 不含数据，和 /login 一样免鉴权，便于外部探活
+                    if (IsLoopback(ctx.Connection.RemoteIpAddress)
+                        || ctx.Request.Path == "/login"
+                        || ctx.Request.Path == "/api/health")
+                    {
+                        await next(ctx);
+                        return;
+                    }
+
+                    if (await _users.ResolveTokenAsync(ctx.Request.Headers["X-Token"]) is null)
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        await ctx.Response.WriteAsJsonAsync(new { error = "unauthorized" }, Json);
+                        return;
+                    }
+
                     await next(ctx);
-                    return;
-                }
+                });
 
-                if (!await _users.IsValidTokenAsync(ctx.Request.Headers["X-Token"]))
-                {
-                    ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    await ctx.Response.WriteAsJsonAsync(new { error = "unauthorized" }, Json);
-                    return;
-                }
+                app.MapPost("/login", LoginAsync);
+                app.MapGet("/sync", (HttpContext ctx) => GetAsync(ctx));
+                app.MapPost("/sync", (HttpContext ctx) => PostAsync(ctx));
+            }
 
-                await next(ctx);
-            });
-
-            app.MapPost("/login", LoginAsync);
-            app.MapGet("/sync", (HttpContext ctx) => GetAsync(ctx));
-            app.MapPost("/sync", (HttpContext ctx) => PostAsync(ctx));
-
-            // 课表：与 /sync 共用 5080，只读数据，不碰任务库
+            // 课表：与本机浏览器直接打交道，无论待办走哪里都得在。
+            // 它的跨源放行与 PNA 预检由 ScheduleApi 自己加头，不依赖上面的鉴权中间件。
             app.MapScheduleEndpoints();
 
             app.Start();
             _app = app;
-            LanUrl = ResolveLanUrl();
+            LanUrl = serveTasks ? ResolveLanUrl() : null;
             return true;
         }
         catch (Exception ex)
@@ -109,16 +130,16 @@ public sealed class SyncServer : IDisposable
     private async Task LoginAsync(HttpContext ctx)
     {
         var request = await ctx.Request.ReadFromJsonAsync<LoginRequest>(Json);
-        var token = request is null ? null : await _users.LoginAsync(request.Name, request.Password);
+        var result = request is null ? null : await _users.LoginAsync(request.Name, request.Password);
 
-        if (token is null)
+        if (result is null)
         {
             ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await ctx.Response.WriteAsJsonAsync(new { error = "用户名或密码错误" }, Json);
             return;
         }
 
-        await ctx.Response.WriteAsJsonAsync(new { token, name = request!.Name }, Json);
+        await ctx.Response.WriteAsJsonAsync(new { token = result.Value.Token, name = request!.Name }, Json);
     }
 
     /// <summary>手机端改过闹钟（停用 / 删除）后触发，让电脑端「闹钟」列表跟着刷新。</summary>
@@ -129,8 +150,9 @@ public sealed class SyncServer : IDisposable
     {
         var since = long.TryParse(ctx.Request.Query["since"], out var parsed) ? parsed : 0;
 
-        var tasks = await _store.GetChangedSinceAsync(since);
-        var maxRev = await _store.GetMaxRevAsync();
+        // 桌面内嵌服务是单用户本地模式，固定用 user_id=0 槽位
+        var tasks = await _store.GetChangedSinceAsync(0, since);
+        var maxRev = await _store.GetMaxRevAsync(0);
 
         await ctx.Response.WriteAsJsonAsync(Payload(maxRev, null, null, tasks, Alarms()), Json);
     }
@@ -145,9 +167,10 @@ public sealed class SyncServer : IDisposable
             return;
         }
 
-        var apply = await _store.ApplyAsync(request.Changes);
+        // 桌面内嵌服务是单用户本地模式，固定用 user_id=0 槽位
+        var apply = await _store.ApplyAsync(0, request.Changes);
         ApplyAlarmChanges(request.AlarmChanges);
-        var tasks = await _store.GetChangedSinceAsync(request.Since);
+        var tasks = await _store.GetChangedSinceAsync(0, request.Since);
 
         var accepted = apply.Accepted.Select(a => new { id = a.Id, rev = a.Rev });
         var rejected = apply.Rejected.Select(r => new { id = r.Id, reason = r.Reason, server = r.Server });
@@ -249,33 +272,4 @@ public sealed class SyncServer : IDisposable
             await app.DisposeAsync().ConfigureAwait(false);
         });
     }
-}
-
-/// <summary>POST /sync 的请求体。</summary>
-public sealed class SyncRequest
-{
-    public long Since { get; set; }
-
-    public List<TaskItem> Changes { get; set; } = [];
-
-    /// <summary>手机端对闹钟的开关 / 删除，可为空。</summary>
-    public List<AlarmChange> AlarmChanges { get; set; } = [];
-}
-
-/// <summary>手机端上报的一条闹钟改动。</summary>
-public sealed class AlarmChange
-{
-    public string Id { get; set; } = string.Empty;
-
-    public bool? Enabled { get; set; }
-
-    public bool? Deleted { get; set; }
-}
-
-/// <summary>POST /login 的请求体。</summary>
-public sealed class LoginRequest
-{
-    public string Name { get; set; } = string.Empty;
-
-    public string Password { get; set; } = string.Empty;
 }

@@ -11,6 +11,7 @@ using DidaLite.App.Services;
 using DidaLite.App.ViewModels;
 using DidaLite.Core;
 using DidaLite.Data;
+using DidaLite.Data.Sync;
 
 namespace DidaLite.App.Views;
 
@@ -23,6 +24,7 @@ public partial class MainWindow : Window
     private TrayService? _tray;
     private HotkeyService? _hotkey;
     private SyncServer? _sync;
+    private SyncClient? _client;
     private SettingsWindow? _settings;
 
     /// <summary>当前真正生效的快捷键文本，取消录制时用它恢复显示。</summary>
@@ -45,6 +47,12 @@ public partial class MainWindow : Window
     /// <summary>等待 Enter 确认删除的任务。</summary>
     private TaskViewModel? _pendingDelete;
 
+    /// <summary>等待 Enter 确认删除的便签。两者互斥，同一时刻只会有一个非空。</summary>
+    private NoteViewModel? _pendingNoteDelete;
+
+    /// <summary>右上角的同步浮层：贴在「同步 / 添加」下方，4 秒后自己收起。</summary>
+    private readonly SyncToastHost _syncToast;
+
     /// <summary>提醒 / 托盘 / 同步只启动一次（开机自启时窗口不显示，Loaded 不会触发）。</summary>
     private bool _servicesStarted;
 
@@ -52,6 +60,7 @@ public partial class MainWindow : Window
     private YearView? _yearView;
     private FocusView? _focusView;
     private ScheduleView? _scheduleView;
+    private NotesView? _notesView;
 
     /// <summary>绿色小圆点的直径（逻辑像素）。</summary>
     private const double SegmentDotSize = 8;
@@ -91,12 +100,21 @@ public partial class MainWindow : Window
         SoundService.CustomPath = _store.GetMeta("ring.path");
 
         _alarms = new AlarmService(_store);
-        _vm = new MainViewModel(_store, _alarms, SyncClient.Create(_store));
+        _client = SyncClient.Create(_store);
+        _vm = new MainViewModel(_store, _alarms, _client);
         DataContext = _vm;
 
         _vm.PropertyChanged += OnViewModelPropertyChanged;
         _vm.AccountRequired += OnAccountRequired;
+        _vm.ConfirmAccountSwitch += ConfirmAccountSwitch;
         _vm.Focus.CountdownFinished += OnCountdownFinished;
+
+        // 同步反馈：右上角弹一条浮层，报上传 / 下载各几条
+        _syncToast = new SyncToastHost(SyncToastLayer);
+        _vm.SyncToastRequested += _syncToast.Post;
+
+        // 新建便签后把光标放进正文，省一次点击
+        _vm.NoteEditorFocusRequested += () => _notesView?.FocusBody();
 
         InputBindings.Add(new KeyBinding(_vm.SyncCommand, Key.R, ModifierKeys.Control));
         InputBindings.Add(new KeyBinding(_vm.NewTaskCommand, Key.N, ModifierKeys.Control));
@@ -153,6 +171,23 @@ public partial class MainWindow : Window
     /// <summary>内嵌同步 API 启动并同步一次；起不来只是同步不可用，待办与提醒照常。</summary>
     private void StartSyncServer()
     {
+        // 远程模式：权威库在自建服务器上，本机不再开任务同步——
+        // 否则手机可能连到这台电脑的空库，看到的是另一份数据。
+        // 但课表仍要本机 5080：抓取脚本是在教务系统的 https 页面里跑的，只能 POST 回回环地址
+        // （公网 HTTP 会被当成混合内容拦掉），所以这里起一个只服务课表的实例：
+        // 不挂 /sync、/login，且只监听 127.0.0.1，局域网也访问不到。
+        if (_client?.IsRemote == true)
+        {
+            _sync = SyncServer.Start(_store, serveTasks: false);
+
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                _vm.SyncAddress = _client.Address;
+                await SyncQuietlyAsync();
+            }));
+            return;
+        }
+
         // Kestrel 冷启动要一两百毫秒，放到后台线程，界面先能点再说
         _sync = SyncServer.Start(_store);
 
@@ -163,13 +198,27 @@ public partial class MainWindow : Window
                 Dispatcher.BeginInvoke(new Action(() => _alarms.NotifyChanged()));
         }
 
-        Dispatcher.BeginInvoke(new Action(() =>
+        Dispatcher.BeginInvoke(new Action(async () =>
         {
             if (_sync?.LanUrl is { } lanUrl) _vm.SyncAddress = lanUrl;
 
             // 启动同步一次，把另一端刚改的内容带回来（计划书 4.4）
-            if (_sync is not null) _vm.SyncCommand.Execute(null);
+            if (_sync is not null) await SyncQuietlyAsync();
         }));
+    }
+
+    /// <summary>启动时那次同步：结果只进设置页的说明文字，右上角不弹浮层。</summary>
+    private async Task SyncQuietlyAsync()
+    {
+        _vm.SyncToastEnabled = false;
+        try
+        {
+            await _vm.SyncCommand.ExecuteAsync(null);
+        }
+        finally
+        {
+            _vm.SyncToastEnabled = true;
+        }
     }
 
     /// <summary>头部左右两组内容自身宽度变化（文字变了、按钮显隐）时，重算侧栏右极限。</summary>
@@ -380,14 +429,6 @@ public partial class MainWindow : Window
         return true;
     }
 
-    /// <summary>设置里改了服务器地址：写回 .env，并更新手机端该填的地址。</summary>
-    private void SaveServerAddress(string baseUrl)
-    {
-        EnvFile.Set("DIDA_LAN_ADDR", baseUrl);
-        _sync?.UpdateLanUrl(baseUrl);
-        _vm.SyncAddress = baseUrl.TrimEnd('/') + "/sync";
-    }
-
     private void SettingsButton_Click(object sender, RoutedEventArgs e) => ShowSettings();
 
     /// <summary>
@@ -405,6 +446,13 @@ public partial class MainWindow : Window
     /// <summary>同步时发现没设账号：直接弹设置，用户不用自己去找入口。</summary>
     private void OnAccountRequired() => Dispatcher.BeginInvoke(ShowSettings);
 
+    /// <summary>
+    /// 换账号要清空本地待办：默认按钮落在「取消」，手滑回车不会删数据。
+    /// </summary>
+    private bool ConfirmAccountSwitch(string question) =>
+        MessageBox.Show(this, question, "更换同步账号",
+            MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK;
+
     private void ShowSettings()
     {
         if (_settings is { IsVisible: true })
@@ -413,7 +461,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settings = new SettingsWindow(_vm, TryApplyHotkey, SetHotkeyEnabled, SaveServerAddress) { Owner = this };
+        _settings = new SettingsWindow(_vm, TryApplyHotkey, SetHotkeyEnabled) { Owner = this };
         _settings.Closed += (_, _) => _settings = null;
         _settings.ShowDialog();
     }
@@ -491,6 +539,10 @@ public partial class MainWindow : Window
             case nameof(MainViewModel.IsScheduleView) when _vm.IsScheduleView:
                 EnsureView(ref _scheduleView, ScheduleHost,
                     () => new ScheduleView { DataContext = _vm.Schedule });
+                break;
+
+            case nameof(MainViewModel.IsNotesView) when _vm.IsNotesView:
+                EnsureView(ref _notesView, NotesHost, () => new NotesView());
                 break;
         }
     }
@@ -753,7 +805,8 @@ public partial class MainWindow : Window
             if (e.Key == Key.Enter)
             {
                 e.Handled = true;
-                _ = ConfirmDeleteAsync();
+                if (_pendingNoteDelete is not null) ConfirmNoteDelete();
+                else _ = ConfirmDeleteAsync();
             }
             else if (e.Key == Key.Escape)
             {
@@ -797,6 +850,13 @@ public partial class MainWindow : Window
     /// <summary>主面板：上下移动选中行、Enter 完成、Delete 请求删除。</summary>
     private void HandleMainKeys(KeyEventArgs e)
     {
+        // 便签页是另一套选中模型（列表 + 右栏正文），别让它落到任务的键位逻辑里
+        if (_vm.Mode == ViewMode.Notes)
+        {
+            HandleNoteKeys(e);
+            return;
+        }
+
         if (_vm.Mode is ViewMode.Month or ViewMode.Year or ViewMode.Focus or ViewMode.Schedule) return;
 
         if (e.Key is Key.Up or Key.W)
@@ -819,6 +879,41 @@ public partial class MainWindow : Window
             e.Handled = true;
             RequestDeleteSelection();
         }
+    }
+
+    /// <summary>便签页：上下（或 W/S）换一条，Delete 请求删除。点过列表里任意一条之后就能纯键盘操作。</summary>
+    private void HandleNoteKeys(KeyEventArgs e)
+    {
+        if (e.Key is Key.Up or Key.W)
+        {
+            e.Handled = true;
+            MoveNoteSelection(-1);
+        }
+        else if (e.Key is Key.Down or Key.S)
+        {
+            e.Handled = true;
+            MoveNoteSelection(1);
+        }
+        else if (e.Key == Key.Delete)
+        {
+            e.Handled = true;
+            RequestDeleteNote();
+        }
+    }
+
+    /// <summary>在便签列表里上下移动选中项，并把它滚进可视区。</summary>
+    private void MoveNoteSelection(int delta)
+    {
+        var notes = _vm.Notes;
+        if (notes.Count == 0) return;
+
+        var index = _vm.SelectedNote is { } current ? notes.IndexOf(current) : -1;
+        var next = index < 0
+            ? (delta > 0 ? 0 : notes.Count - 1)
+            : Math.Clamp(index + delta, 0, notes.Count - 1);
+
+        _vm.SelectedNote = notes[next];
+        _notesView?.ScrollSelectedIntoView();
     }
 
     /// <summary>按视觉顺序上下移动选中行，选中即打开右侧详情。</summary>
@@ -895,7 +990,31 @@ public partial class MainWindow : Window
     private void CancelDelete()
     {
         _pendingDelete = null;
+        _pendingNoteDelete = null;
         ConfirmBar.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>便签页的 Delete：同样先弹确认条，Enter 才真删，免得手滑把正文弄没了。</summary>
+    private void RequestDeleteNote()
+    {
+        var selected = _vm.SelectedNote;
+        if (selected is null) return;
+
+        _pendingDelete = null;
+        _pendingNoteDelete = selected;
+        ConfirmText.Text = $"删除便签「{selected.DisplayTitle}」？";
+        ConfirmBar.Visibility = Visibility.Visible;
+    }
+
+    private void ConfirmNoteDelete()
+    {
+        var target = _pendingNoteDelete;
+        CancelDelete();
+        if (target is null) return;
+
+        // 确认条开着的时候选中可能被改过，先切回要删的那条再删
+        if (!ReferenceEquals(_vm.SelectedNote, target)) _vm.SelectedNote = target;
+        _vm.DeleteNoteCommand.Execute(null);
     }
 
     /// <summary>日 / 周 / 月 / 专注切换：绿块缩成小圆点，圆点飞到目标按钮后再展开成整块。</summary>
@@ -910,6 +1029,7 @@ public partial class MainWindow : Window
             "year" => ViewMode.Year,
             "focus" => ViewMode.Focus,
             "schedule" => ViewMode.Schedule,
+            "notes" => ViewMode.Notes,
             _ => ViewMode.Day
         };
 
@@ -950,6 +1070,9 @@ public partial class MainWindow : Window
                     break;
                 case ViewMode.Schedule:
                     _vm.ShowScheduleSegmentCommand.Execute(null);
+                    break;
+                case ViewMode.Notes:
+                    _vm.ShowNotesSegmentCommand.Execute(null);
                     break;
                 default:
                     _vm.ShowDaySegmentCommand.Execute(null);
@@ -1051,6 +1174,7 @@ public partial class MainWindow : Window
         ViewMode.Month => 2,
         ViewMode.Year => 3,
         ViewMode.Focus => 4,
+        ViewMode.Notes => 5,
         _ => 0
     };
 
@@ -1083,6 +1207,7 @@ public partial class MainWindow : Window
         ViewMode.Month => MonthSegmentButton,
         ViewMode.Year => YearSegmentButton,
         ViewMode.Focus => FocusSegmentButton,
+        ViewMode.Notes => NotesSegmentButton,
         _ => DaySegmentButton
     };
 

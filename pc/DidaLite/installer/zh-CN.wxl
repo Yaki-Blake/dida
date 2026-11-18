@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="zh-CN" Codepage="936" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+  <!-- 覆盖官方安装向导的按钮与页面文字（扩展本身只带英文串） -->
+  <String Id="WixUINext" Value="下一步(&amp;N)" />
+  <String Id="WixUIBack" Value="上一步(&amp;B)" />
+  <String Id="WixUICancel" Value="取消" />
+  <String Id="WixUIFinish" Value="完成(&amp;F)" />
+  <String Id="WixUIInstall" Value="安装(&amp;I)" />
+  <String Id="WixUIRemove" Value="卸载(&amp;R)" />
+  <String Id="WixUIChange" Value="更改(&amp;C)" />
+  <String Id="WixUIRepair" Value="修复(&amp;P)" />
+  <String Id="WixUIUpdate" Value="更新(&amp;U)" />
+  <String Id="WixUIYes" Value="是(&amp;Y)" />
+  <String Id="WixUINo" Value="否(&amp;N)" />
+  <String Id="WixUIOK" Value="确定" />
+</WixLocalization>

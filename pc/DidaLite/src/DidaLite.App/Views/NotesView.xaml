@@ -1,0 +1,194 @@
+<UserControl x:Class="DidaLite.App.Views.NotesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <!-- 便签页：左边列表、右边正文，边打边存，同步时两端合并 -->
+    <Grid Margin="8,0,8,16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="268" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 左：列表 -->
+        <Border Grid.Column="0"
+                Background="{DynamicResource bg-surface}"
+                BorderBrush="{DynamicResource line}" BorderThickness="1"
+                CornerRadius="{StaticResource RadiusL}"
+                Padding="8,10,8,8">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="4,0,4,8">
+                    <TextBlock Text="全部便签" Style="{StaticResource MetaText}" VerticalAlignment="Center" />
+                    <Button Content="+ 新建" Style="{StaticResource PrimaryButton}"
+                            Command="{Binding NewNoteCommand}"
+                            HorizontalAlignment="Right" Padding="10,4" />
+                </Grid>
+
+                <Grid Grid.Row="1">
+                    <ListBox x:Name="NoteList"
+                             ItemsSource="{Binding Notes}"
+                             SelectedItem="{Binding SelectedNote, Mode=TwoWay}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             Visibility="{Binding HasNotes, Converter={StaticResource BoolToVis}}">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0,0,0,4" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="Card"
+                                                    Background="Transparent"
+                                                    CornerRadius="{StaticResource RadiusM}"
+                                                    Padding="10,8">
+                                                <ContentPresenter />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource bg-hover}" />
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource accent-weak}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel>
+                                    <Grid>
+                                        <TextBlock Text="{Binding DisplayTitle}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   FontSize="{StaticResource FontSize14}"
+                                                   Foreground="{DynamicResource text-primary}" />
+                                        <TextBlock Text="{Binding PinMark}"
+                                                   HorizontalAlignment="Right"
+                                                   Style="{StaticResource MetaText}"
+                                                   Foreground="{DynamicResource accent}" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding Preview}"
+                                               Margin="0,3,0,0"
+                                               TextTrimming="CharacterEllipsis"
+                                               Visibility="{Binding HasPreview, Converter={StaticResource BoolToVis}}"
+                                               Style="{StaticResource MetaText}" />
+                                    <TextBlock Text="{Binding Stamp}"
+                                               Margin="0,4,0,0"
+                                               Style="{StaticResource MetaText}"
+                                               Foreground="{DynamicResource text-secondary}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasNotes}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <TextBlock Text="还没有便签" HorizontalAlignment="Center"
+                                   Style="{StaticResource HintText}" />
+                        <TextBlock Text="点「+ 新建」写第一条"
+                                   HorizontalAlignment="Center" Margin="0,4,0,0"
+                                   Style="{StaticResource HintText}"
+                                   Foreground="{DynamicResource text-secondary}" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 右：正文编辑 -->
+        <Border Grid.Column="1" Margin="12,0,0,0"
+                Background="{DynamicResource bg-surface}"
+                BorderBrush="{DynamicResource line}" BorderThickness="1"
+                CornerRadius="{StaticResource RadiusL}"
+                Padding="16,12,16,12"
+                Visibility="{Binding HasSelectedNote, Converter={StaticResource BoolToVis}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBox x:Name="NoteTitleBox"
+                         Grid.Row="0"
+                         Style="{StaticResource InputTextBox}"
+                         FontSize="{StaticResource FontSize16}"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         Padding="0,4"
+                         Text="{Binding NoteTitle, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="标题，可以留空" />
+
+                <TextBox x:Name="NoteBodyBox"
+                         Grid.Row="1"
+                         Margin="0,6,0,0"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         Foreground="{DynamicResource text-primary}"
+                         CaretBrush="{DynamicResource text-primary}"
+                         FontSize="{StaticResource FontSize14}"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         VerticalContentAlignment="Top"
+                         VerticalScrollBarVisibility="Auto"
+                         Padding="0"
+                         Text="{Binding NoteBody, UpdateSourceTrigger=PropertyChanged}" />
+
+                <Grid Grid.Row="2" Margin="0,8,0,0">
+                    <TextBlock Text="{Binding NoteStamp}" VerticalAlignment="Center"
+                               Style="{StaticResource MetaText}"
+                               Foreground="{DynamicResource text-secondary}" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="{Binding NotePinText}" Style="{StaticResource GhostButton}"
+                                Command="{Binding TogglePinNoteCommand}" Padding="10,4" />
+                        <Button Content="复制" Style="{StaticResource GhostButton}"
+                                Command="{Binding CopyNoteCommand}" Margin="6,0,0,0" Padding="10,4" />
+                        <Button Content="删除" Style="{StaticResource GhostButton}"
+                                Command="{Binding DeleteNoteCommand}" Margin="6,0,0,0" Padding="10,4" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 没选中任何一条时的右侧占位 -->
+        <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center"
+                    Margin="12,0,0,0">
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasSelectedNote}" Value="False">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </StackPanel.Style>
+            <TextBlock Text="选一条便签，或点「+ 新建」" HorizontalAlignment="Center"
+                       Style="{StaticResource HintText}" />
+            <TextBlock Text="便签会在手机与电脑之间同步" HorizontalAlignment="Center"
+                       Margin="0,6,0,0" Style="{StaticResource HintText}"
+                       Foreground="{DynamicResource text-secondary}" />
+        </StackPanel>
+    </Grid>
+</UserControl>

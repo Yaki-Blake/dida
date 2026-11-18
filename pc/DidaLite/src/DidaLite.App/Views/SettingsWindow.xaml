@@ -34,58 +34,40 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="24,20,24,8">
                 <TextBlock Text="设置" Style="{StaticResource PageTitle}" />
-                <TextBlock Text="电脑是数据主库；手机填下面的地址和账号即可同步。"
+                <TextBlock Text="先填好服务器地址和账号，点「登录」确认能连上；之后电脑和手机都用同一份数据。"
                            Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,6,0,16" />
 
-                <!-- 服务器地址 -->
+                <!-- 同步服务器：地址 + 账号 + 密码，点「登录」当场验证能不能连上 -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
-                        <TextBlock Text="服务器地址" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="手机与电脑连同一个 Wi-Fi，把下面这个地址填到手机端。"
-                                   Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,4,0,8" />
-
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-
-                            <TextBox x:Name="AddressBox" Style="{StaticResource InputTextBox}" />
-                            <Button Grid.Column="1" Content="复制" Style="{StaticResource GhostButton}"
-                                    Margin="8,0,0,0" Click="CopyAddress_Click" />
-                        </Grid>
-
-                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="保存地址" Style="{StaticResource GhostButton}"
-                                    Click="SaveAddress_Click" />
-                            <TextBlock x:Name="AddressStatus" Style="{StaticResource HintText}"
-                                       VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-
-                <!-- 用户信息 -->
-                <Border Style="{StaticResource Card}">
-                    <StackPanel>
-                        <TextBlock Text="用户信息" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="手机端同步要用这里的用户名和密码，账号保存在电脑的 MySQL 里。"
+                        <TextBlock Text="同步服务器" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="电脑和手机都连这台服务器：数据存在它上面，电脑关机也不影响手机用。"
                                    Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,4,0,0" />
 
+                        <TextBlock Text="服务器地址" Style="{StaticResource FieldLabel}" />
+                        <TextBox x:Name="RemoteUrlBox" Style="{StaticResource InputTextBox}"
+                                 AutomationProperties.AutomationId="RemoteUrlBox" />
+
                         <TextBlock Text="用户名" Style="{StaticResource FieldLabel}" />
-                        <TextBox x:Name="UserNameBox" Style="{StaticResource InputTextBox}"
-                                 AutomationProperties.AutomationId="UserNameBox" />
+                        <TextBox x:Name="RemoteUserBox" Style="{StaticResource InputTextBox}"
+                                 AutomationProperties.AutomationId="RemoteUserBox" />
 
-                        <TextBlock Text="密码（至少 6 位）" Style="{StaticResource FieldLabel}" />
-                        <PasswordBox x:Name="PasswordBox" Style="{StaticResource InputPasswordBox}"
-                                     AutomationProperties.AutomationId="UserPasswordBox" />
+                        <!-- 登录态下密码框整组隐藏；登出后重新出现 -->
+                        <TextBlock x:Name="PasswordLabel" Text="密码" Style="{StaticResource FieldLabel}" />
+                        <PasswordBox x:Name="RemotePasswordBox" Style="{StaticResource InputPasswordBox}"
+                                     AutomationProperties.AutomationId="RemotePasswordBox" />
 
-                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                            <Button Content="保存账号" Style="{StaticResource PrimaryButton}"
-                                    Click="SaveUser_Click" />
+                        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                            <Button x:Name="LoginButton" Content="登录" Style="{StaticResource PrimaryButton}"
+                                    Click="Login_Click" MinWidth="88"
+                                    AutomationProperties.AutomationId="LoginButton" />
+                            <Button x:Name="LogoutButton" Content="登出" Style="{StaticResource GhostButton}"
+                                    Click="Logout_Click" MinWidth="88" Visibility="Collapsed"
+                                    AutomationProperties.AutomationId="LogoutButton" />
+                            <TextBlock x:Name="ModeStatus" Style="{StaticResource HintText}"
+                                       VerticalAlignment="Center" Margin="10,0,0,0"
+                                       TextWrapping="Wrap" MaxWidth="330" />
                         </StackPanel>
-
-                        <TextBlock x:Name="UserStatus" Style="{StaticResource HintText}"
-                                   TextWrapping="Wrap" Margin="0,8,0,0" />
                     </StackPanel>
                 </Border>
 

@@ -29,6 +29,17 @@ object SystemCalendar {
         val remindAt: Long?,
     )
 
+    /**
+     * 事件清单里的一行：比 [Event] 多了「已被删掉」和「是不是我们自己写的」两个标记。
+     */
+    data class EventRow(
+        val eventId: Long,
+        val title: String,
+        val startAt: Long,
+        val deleted: Boolean,
+        val own: Boolean,
+    )
+
     fun read(context: Context): List<Event> {
         val now = System.currentTimeMillis()
         val begin = now - 30L * 24 * 60 * 60 * 1000
@@ -76,6 +87,44 @@ object SystemCalendar {
         return events
     }
 
+    /**
+     * 全部事件的清单，用来核对「这条任务对应的事件还在不在」。
+     * 不按时间过滤，也不排除我们自己写的事件——两件事都要看。
+     * 读不到（没权限、日历应用挂了）就返回 null，调用方据此放弃本轮判断，一条也不删。
+     */
+    fun inventory(context: Context): List<EventRow>? = try {
+        val projection = arrayOf(
+            CalendarContract.Events._ID,
+            CalendarContract.Events.TITLE,
+            CalendarContract.Events.DTSTART,
+            CalendarContract.Events.DELETED,
+            CalendarContract.Events.CUSTOM_APP_PACKAGE,
+        )
+        context.contentResolver.query(
+            CalendarContract.Events.CONTENT_URI,
+            projection,
+            null,
+            null,
+            null,
+        )?.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(
+                        EventRow(
+                            eventId = c.getLong(0),
+                            title = c.getString(1) ?: "",
+                            startAt = if (c.isNull(2)) 0L else c.getLong(2),
+                            deleted = !c.isNull(3) && c.getInt(3) != 0,
+                            own = !c.isNull(4) && c.getString(4) == OWNER_PACKAGE,
+                        )
+                    )
+                }
+            }
+        }
+    } catch (e: Exception) {
+        null
+    }
+
     /** 提醒的分钟数是「事件开始前多少分钟」，换算成绝对 UTC 毫秒。 */
     private fun firstReminder(context: Context, eventId: Long, startAt: Long): Long? {
         context.contentResolver.query(
@@ -88,9 +137,36 @@ object SystemCalendar {
         return null
     }
 
-    /** 事件转本地任务：id 用 "C" + 事件 id 右补零到 26 位，对齐服务端 CHAR(26)。 */
+    // ---------- 任务 id 与事件号的对应 ----------
+
+    /**
+     * 任务 id 一律 26 位、C 开头、后面全数字，对齐服务端 CHAR(26)。
+     *
+     * 新编码把事件号**前面**补零：C000…003。事件号 3 和 30 不会撞成同一个 id。
+     * 旧版本是**后面**补零（C300…0），3 和 30 会撞车，老任务还留着那种 id，
+     * 所以认领老任务时要用 [legacyEncode]，新建任务一律用 [encode]。
+     */
+    fun encode(eventId: Long): String = "C" + eventId.toString().padStart(25, '0')
+
+    /** 旧编码：事件号后面补零。只用来认领老任务，不再生成新的。 */
+    fun legacyEncode(eventId: Long): String = "C" + eventId.toString().padEnd(25, '0')
+
+    /** 是不是从系统日历导入出来的任务：C 开头 + 后 25 位全数字。 */
+    fun isCalendarOrigin(id: String): Boolean =
+        id.length == 26 && id[0] == 'C' && id.drop(1).all { it in '0'..'9' }
+
+    /** 是不是旧编码的任务：C 后面第一位不是 0（补零在前面的新编码第一位一定是 0）。 */
+    fun isLegacyId(id: String): Boolean = isCalendarOrigin(id) && id[1] != '0'
+
+    /** 新编码的任务 id 反推事件号：去掉 C 和前导 0 就是事件号。旧编码反推不唯一，不给算。 */
+    fun decodeEventId(id: String): Long? {
+        if (!isCalendarOrigin(id) || isLegacyId(id)) return null
+        return id.drop(1).trimStart('0').toLongOrNull()
+    }
+
+    /** 事件转本地任务：id 用 [encode]，对齐服务端 CHAR(26)。 */
     fun toTask(e: Event): Task = Task(
-        id = "C" + e.eventId.toString().padEnd(25, '0'),
+        id = encode(e.eventId),
         title = e.title,
         note = e.note,
         location = e.location,
@@ -102,14 +178,21 @@ object SystemCalendar {
         dirty = true,
     )
 
-    /** 导入：新事件插入；已存在且日历侧有变化才覆盖；墓碑不复活，避免删了又被读回来。 */
+    /**
+     * 导入：新事件插入；已存在且日历侧有变化才覆盖；墓碑不复活，避免删了又被读回来。
+     * 每导入一条就登记「任务 ↔ 事件」的对应关系，之后日历里删掉事件才认得出该删哪条任务。
+     */
     fun importInto(db: Db, events: List<Event>): Int {
         var changed = 0
+        val byEvent = db.calendarLinks().entries.associate { (taskId, eventId) -> eventId to taskId }
+        // 旧编码会让事件号 3 和 30 撞成同一个 id，撞车的一批只能靠标题和时间认领
+        val legacyGroups = events.groupBy { legacyEncode(it.eventId) }
         for (e in events) {
             val task = toTask(e)
-            val old = db.find(task.id)
+            val old = resolveTask(db, e, byEvent, legacyGroups)
             if (old == null) {
                 db.saveLocal(task)
+                db.linkCalendar(task.id, e.eventId)
                 changed++
                 continue
             }
@@ -121,10 +204,34 @@ object SystemCalendar {
                 old.location == task.location &&
                 old.allDay == task.allDay
             if (same) continue
-            db.saveLocal(task.copy(rev = old.rev, updatedAt = System.currentTimeMillis()))
+            db.saveLocal(task.copy(id = old.id, rev = old.rev, updatedAt = System.currentTimeMillis()))
+            db.linkCalendar(old.id, e.eventId)
             changed++
         }
         return changed
+    }
+
+    /**
+     * 找这条事件在本地对应哪条任务：先看链接表，再看有没有旧编码的老任务，最后看新编码。
+     * 认不出来就返回 null（新建一条），宁可多一条也不把别人的日程改掉。
+     */
+    private fun resolveTask(
+        db: Db,
+        e: Event,
+        byEvent: Map<Long, String>,
+        legacyGroups: Map<String, List<Event>>,
+    ): Task? {
+        byEvent[e.eventId]?.let { id -> db.find(id)?.let { return it } }
+        val legacyId = legacyEncode(e.eventId)
+        if (!isLegacyId(legacyId)) return null
+        val old = db.find(legacyId) ?: return db.find(encode(e.eventId))
+        val group = legacyGroups[legacyId].orEmpty()
+        if (group.size > 1) {
+            // 撞车了：只有标题和时间都对得上，才算这条老任务就是这条事件
+            val hit = group.filter { it.title == old.title && it.startAt == old.startAt }
+            if (hit.size != 1 || hit[0].eventId != e.eventId) return null
+        }
+        return old
     }
 }
 
@@ -208,6 +315,8 @@ object CalendarWriter {
 
         // 任务已删除（墓碑）或本地已不存在：连日历事件一起删掉
         for ((taskId, eventId) in links) {
+            // 从日历导入的任务，事件是用户自己的，不归我们删——它自己没了就是用户删的
+            if (isCalendarOrigin(taskId)) continue
             val task = db.find(taskId)
             if (task != null && !task.deleted) continue
             resolver.delete(ContentUris.withAppendedId(Events.CONTENT_URI, eventId), null, null)
@@ -245,9 +354,8 @@ object CalendarWriter {
 
     // ---------- 内部 ----------
 
-    /** 从系统日历导入的任务 id 是「C + 事件 id 补零到 26 位」。 */
-    private fun isCalendarOrigin(id: String): Boolean =
-        id.length == 26 && id[0] == 'C' && id.drop(1).all { it in '0'..'9' }
+    /** 从系统日历导入的任务不再往日历里写：它本来就有事件。 */
+    private fun isCalendarOrigin(id: String): Boolean = SystemCalendar.isCalendarOrigin(id)
 
     /** 全天事件要落在整天上：按本地日期取当天 0 点，再换成 UTC 的 0 点。 */
     private fun span(task: Task, startAt: Long): Pair<Long, Long> {

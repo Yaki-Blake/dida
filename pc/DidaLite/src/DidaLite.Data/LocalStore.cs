@@ -51,6 +51,7 @@ public sealed class LocalStore
             cmd.CommandText = """
                 CREATE TABLE IF NOT EXISTS task (
                   id          TEXT PRIMARY KEY,
+                  user_id     INTEGER NOT NULL DEFAULT 0,
                   title       TEXT NOT NULL,
                   note        TEXT,
                   location    TEXT,
@@ -63,7 +64,8 @@ public sealed class LocalStore
                   updated_at  INTEGER NOT NULL,
                   rev         INTEGER NOT NULL DEFAULT 0,
                   dirty       INTEGER NOT NULL DEFAULT 0,
-                  reminded_at INTEGER
+                  reminded_at INTEGER,
+                  all_day     INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_task_rev ON task(rev);
                 CREATE INDEX IF NOT EXISTS idx_task_due ON task(due_at);
@@ -86,14 +88,33 @@ public sealed class LocalStore
                   dirty        INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_alarm_rev ON alarm(rev);
+                CREATE TABLE IF NOT EXISTS note (
+                  id          TEXT PRIMARY KEY,
+                  title       TEXT NOT NULL DEFAULT '',
+                  body        TEXT NOT NULL DEFAULT '',
+                  pinned      INTEGER NOT NULL DEFAULT 0,
+                  deleted     INTEGER NOT NULL DEFAULT 0,
+                  updated_at  INTEGER NOT NULL,
+                  rev         INTEGER NOT NULL DEFAULT 0,
+                  dirty       INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_note_rev ON note(rev);
                 """;
             cmd.ExecuteNonQuery();
         }
 
-        // 老库补列（地点 / 起始时间 / 全天）
+        // 老库补列（地点 / 起始时间 / 全天 / 用户归属）
         EnsureColumn(conn, "location", "TEXT");
         EnsureColumn(conn, "start_at", "INTEGER");
         EnsureColumn(conn, "all_day", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(conn, "user_id", "INTEGER NOT NULL DEFAULT 0");
+
+        // user_id 列就位后再建索引（老库最初没有这列，提前建会报 no such column: user_id）
+        using (var idx = conn.CreateCommand())
+        {
+            idx.CommandText = "CREATE INDEX IF NOT EXISTS idx_task_user_rev ON task(user_id, rev)";
+            idx.ExecuteNonQuery();
+        }
 
         // rev=0 表示从未同步过的本地行（老数据 / 示例任务），补上待上传标记，首次同步会带到服务端
         using var mark = conn.CreateCommand();
@@ -254,6 +275,49 @@ public sealed class LocalStore
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// 换了同步后端（单机 ↔ 自建服务器）之后调用：游标已经归零，本地这些行也得重新推一遍，
+    /// 否则新后端只收到"切换之后"的改动，之前的待办不会过去。
+    /// </summary>
+    public void MarkAllDirty()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE task SET dirty = 1";
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// 换了同步账号：本地这一份属于上一个账号，必须先整表清空，再把新账号的云数据拉下来，
+    /// 否则两边的任务会混在一起（旧账号的 id 在新账号下就是一堆陌生数据）。
+    /// 只清任务、便签与游标；闹钟是设备级设置、不上云，删了就找不回来，因此保留。
+    /// </summary>
+    public void ClearSyncedData()
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            // 便签跟任务一样属于账号数据，换账号必须一起清，否则旧账号的便签会混进新账号
+            cmd.CommandText = "DELETE FROM task; DELETE FROM note;";
+            cmd.ExecuteNonQuery();
+        }
+
+        using (var meta = conn.CreateCommand())
+        {
+            // 游标必须归零，否则会拿着旧账号的 rev 去问新账号要"更新"，什么都拉不到
+            meta.Transaction = tx;
+            meta.CommandText =
+                "DELETE FROM meta WHERE k IN ('cursor', 'note_cursor') " +
+                "OR k LIKE 'rev_seq:%' OR k LIKE 'note_seq:%'";
+            meta.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+    }
+
     public long GetCursor() =>
         long.TryParse(GetMeta("cursor"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : 0;
 
@@ -330,6 +394,171 @@ public sealed class LocalStore
         cmd.Parameters.AddWithValue("$dirty", alarm.Dirty ? 1 : 0);
         cmd.ExecuteNonQuery();
     }
+
+    /// <summary>
+    /// 把服务器带回的闹钟状态并回本地，返回真正改动的条数。
+    ///
+    /// 电脑端是闹钟的出处，所以只接受一种变化：服务器上比本地新的那条（手机端改过开关或删了）。
+    /// 本地没有的 id 一律不新建——别的设备残留的闹钟不该反向塞进这台电脑。
+    /// </summary>
+    public int MergeAlarmsFromServer(IEnumerable<AlarmItem> server)
+    {
+        var remote = server as IList<AlarmItem> ?? server.ToList();
+        if (remote.Count == 0) return 0;
+
+        var local = GetAlarms().ToDictionary(a => a.Id, StringComparer.Ordinal);
+        var applied = 0;
+
+        foreach (var item in remote)
+        {
+            if (!local.TryGetValue(item.Id, out var mine)) continue;
+            if (item.UpdatedAt <= mine.UpdatedAt) continue;
+            if (mine.Enabled == item.Enabled && mine.Deleted == item.Deleted) continue;
+
+            mine.Enabled = item.Enabled;
+            mine.Deleted = item.Deleted;
+            mine.UpdatedAt = item.UpdatedAt;
+            mine.Rev = item.Rev;
+            mine.Dirty = false;
+            UpsertAlarm(mine);
+            applied++;
+        }
+
+        return applied;
+    }
+
+    // ---------------- 便签 ----------------
+
+    private const string NoteColumns =
+        "id, title, body, pinned, deleted, updated_at, rev, dirty";
+
+    /// <summary>未删除的便签：置顶在前，其余按最近修改排。</summary>
+    public List<NoteItem> GetNotes()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT {NoteColumns}
+            FROM note
+            WHERE deleted = 0
+            ORDER BY pinned DESC, updated_at DESC
+            """;
+
+        var list = new List<NoteItem>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) list.Add(MapNote(reader));
+        return list;
+    }
+
+    public List<NoteItem> GetDirtyNotes()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT {NoteColumns} FROM note WHERE dirty = 1";
+        var list = new List<NoteItem>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) list.Add(MapNote(reader));
+        return list;
+    }
+
+    public NoteItem? GetNote(string id)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT {NoteColumns} FROM note WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? MapNote(reader) : null;
+    }
+
+    public void UpsertNote(NoteItem note)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO note (id, title, body, pinned, deleted, updated_at, rev, dirty)
+            VALUES ($id, $title, $body, $pinned, $deleted, $updated, $rev, $dirty)
+            ON CONFLICT(id) DO UPDATE SET
+              title = excluded.title,
+              body = excluded.body,
+              pinned = excluded.pinned,
+              deleted = excluded.deleted,
+              updated_at = excluded.updated_at,
+              rev = excluded.rev,
+              dirty = excluded.dirty
+            """;
+        cmd.Parameters.AddWithValue("$id", note.Id);
+        cmd.Parameters.AddWithValue("$title", note.Title);
+        cmd.Parameters.AddWithValue("$body", note.Body);
+        cmd.Parameters.AddWithValue("$pinned", note.Pinned ? 1 : 0);
+        cmd.Parameters.AddWithValue("$deleted", note.Deleted ? 1 : 0);
+        cmd.Parameters.AddWithValue("$updated", note.UpdatedAt);
+        cmd.Parameters.AddWithValue("$rev", note.Rev);
+        cmd.Parameters.AddWithValue("$dirty", note.Dirty ? 1 : 0);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>服务端接受了本轮推送：记下新 rev 并清 dirty；推送途中又改过的行保持 dirty。</summary>
+    public void NoteMarkSynced(string id, long rev, long sentUpdatedAt)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE note SET rev = $rev, dirty = 0 WHERE id = $id AND updated_at = $sent";
+        cmd.Parameters.AddWithValue("$rev", rev);
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$sent", sentUpdatedAt);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// 落服务端版本。便签两边都能改，所以走时间戳裁决：
+    /// 服务端那一份不比本地新就不动，保证本地未推的改动不会被远端旧版本覆盖。
+    /// </summary>
+    public bool ApplyServerNote(NoteItem note)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO note (id, title, body, pinned, deleted, updated_at, rev, dirty)
+            VALUES ($id, $title, $body, $pinned, $deleted, $updated, $rev, 0)
+            ON CONFLICT(id) DO UPDATE SET
+              title = excluded.title,
+              body = excluded.body,
+              pinned = excluded.pinned,
+              deleted = excluded.deleted,
+              updated_at = excluded.updated_at,
+              rev = excluded.rev,
+              dirty = 0
+            WHERE excluded.updated_at > note.updated_at
+            """;
+        cmd.Parameters.AddWithValue("$id", note.Id);
+        cmd.Parameters.AddWithValue("$title", note.Title);
+        cmd.Parameters.AddWithValue("$body", note.Body);
+        cmd.Parameters.AddWithValue("$pinned", note.Pinned ? 1 : 0);
+        cmd.Parameters.AddWithValue("$deleted", note.Deleted ? 1 : 0);
+        cmd.Parameters.AddWithValue("$updated", note.UpdatedAt);
+        cmd.Parameters.AddWithValue("$rev", note.Rev);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>便签用独立游标，避免和任务的 rev 混在一起（两边发号器互不影响）。</summary>
+    public long GetNoteCursor() =>
+        long.TryParse(GetMeta("note_cursor"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : 0;
+
+    public void SetNoteCursor(long cursor) =>
+        SetMeta("note_cursor", cursor.ToString(CultureInfo.InvariantCulture));
+
+    private static NoteItem MapNote(SqliteDataReader r) => new()
+    {
+        Id = r.GetString(0),
+        Title = r.IsDBNull(1) ? string.Empty : r.GetString(1),
+        Body = r.IsDBNull(2) ? string.Empty : r.GetString(2),
+        Pinned = r.GetInt32(3) != 0,
+        Deleted = r.GetInt32(4) != 0,
+        UpdatedAt = r.GetInt64(5),
+        Rev = r.GetInt64(6),
+        Dirty = r.GetInt32(7) != 0
+    };
 
     private static void Bind(SqliteCommand cmd, TaskItem t, bool? dirty = null)
     {

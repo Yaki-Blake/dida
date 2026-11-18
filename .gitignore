@@ -17,3 +17,7 @@ build/
 *.user
 *.apk
 *.msi
+
+# 本地测试脚本（含口令）与备份文件
+pc/DidaLite/dist/
+*.bak-*
