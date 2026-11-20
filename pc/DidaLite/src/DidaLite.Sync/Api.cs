@@ -175,10 +175,12 @@ internal sealed class Api
         var since = long.TryParse(ctx.Request.Query["since"], out var parsed) ? parsed : 0;
         var noteSince = long.TryParse(ctx.Request.Query["note_since"], out var noteParsed) ? noteParsed : 0;
 
-        var tasks = await _store.GetChangedSinceAsync(userId, since);
+        // 全量快照：返回该账号的完整日历，不再按 since 游标裁剪——
+        // 客户端上传整份、服务器返回整份，逐条按修改时间合并，杜绝增量漏同步。
+        var tasks = await _store.GetAllAsync(userId);
         var maxRev = await _store.GetMaxRevAsync(userId);
         var alarms = await _alarms.GetAlarmsAsync(userId);
-        var notes = await _notes.GetChangedSinceAsync(userId, noteSince);
+        var notes = await _notes.GetAllAsync(userId);
         var noteMaxRev = await _notes.GetMaxRevAsync(userId);
 
         await ctx.Response.WriteAsJsonAsync(Payload(maxRev, null, null, tasks, alarms, notes, noteMaxRev), Json);
@@ -209,9 +211,10 @@ internal sealed class Api
             ? await _notes.ApplyAsync(userId, request.Notes)
             : new ApplyResult { MaxRev = 0 };
 
-        var tasks = await _store.GetChangedSinceAsync(userId, request.Since);
+        // 全量快照：把该账号完整日历回给客户端，逐条按修改时间合并。
+        var tasks = await _store.GetAllAsync(userId);
         var alarms = await _alarms.GetAlarmsAsync(userId);
-        var notes = await _notes.GetChangedSinceAsync(userId, request.NoteSince);
+        var notes = await _notes.GetAllAsync(userId);
         var noteMaxRev = Math.Max(await _notes.GetMaxRevAsync(userId), noteApply.MaxRev);
 
         var accepted = apply.Accepted.Select(a => new { id = a.Id, rev = a.Rev });

@@ -66,26 +66,27 @@ public sealed class LocalStoresTests : IDisposable
     }
 
     [Fact]
-    public async Task Apply_SameTime_DeleteWins()
+    public async Task Apply_SameTime_IsAccepted_Idempotently()
     {
         await _store.ApplyAsync(0, [NewTask("t1", 1000)]);
         var result = await _store.ApplyAsync(0, [new TaskItem { Id = "t1", Title = "写作业", UpdatedAt = 1000, Deleted = true }]);
 
+        // 时间相等视为幂等接受（全量快照重传），不当成"被拒"；写入即生效。
         Assert.Single(result.Accepted);
-        Assert.True(Assert.Single(await _store.GetChangedSinceAsync(0, 0)).Deleted);
+        Assert.True(Assert.Single(await _store.GetChangedSinceAsync(0, 0)).Deleted, "相等时间的墓碑应幂等写入");
     }
 
-    // ---------- 新裁决规则：删除绝对优先 / 新增本地优先 / 编辑时间新者胜 ----------
+    // ---------- 新裁决规则：纯修改时间 newer-wins（删除也只是普通修改） ----------
 
     [Fact]
-    public async Task Apply_LocalDelete_BeatsNewerServerEdit_AndWins()
+    public async Task Apply_NewerLocalDelete_BeatsOlderServerEdit()
     {
-        // 服务端有一条更新时间更晚的编辑（t=5000），本地在更早的时刻删了它（t=1000）。
-        // 旧规则按时间戳会让本地删除被拒、任务复活；新规则删除绝对优先，删除必须能推上去。
-        await _store.ApplyAsync(0, [NewTask("t1", 5000, "服务端的编辑")]);
+        // 服务端有一条更旧的编辑（t=1000），本地在更晚时刻删了它（t=5000）。
+        // 纯时间规则：更晚的删除胜出。
+        await _store.ApplyAsync(0, [NewTask("t1", 1000, "服务端的旧编辑")]);
         var localDelete = new TaskItem
         {
-            Id = "t1", Title = "写作业", UpdatedAt = 1000, Deleted = true,
+            Id = "t1", Title = "写作业", UpdatedAt = 5000, Deleted = true,
             RepeatRule = RepeatRules.None,
         };
 
@@ -94,28 +95,27 @@ public sealed class LocalStoresTests : IDisposable
         Assert.Single(result.Accepted);
         Assert.Empty(result.Rejected);
         var saved = Assert.Single(await _store.GetChangedSinceAsync(0, 0));
-        Assert.True(saved.Deleted, "本地删除应覆盖服务端更晚的编辑，让删除传播到所有端");
+        Assert.True(saved.Deleted, "更晚的本地删除应覆盖服务端更旧的编辑");
     }
 
     [Fact]
-    public async Task Apply_ServerDelete_RejectsNewerLocalEdit_AndSendsTombstoneBack()
+    public async Task Apply_OlderLocalDelete_RejectedByNewerServerResurrect()
     {
-        // 服务端已删（墓碑，t=1000），本地拿一条更晚的编辑来复活（t=5000）。
-        // 删除绝对优先：拒绝这条编辑，并把服务端墓碑回传，让本地跟着删掉。
+        // 服务端已删（t=5000），本地拿一条更早的删除/编辑来（t=1000）：更旧的版本应被拒。
         await _store.ApplyAsync(0, [new TaskItem
         {
-            Id = "t1", Title = "写作业", UpdatedAt = 1000, Deleted = true,
+            Id = "t1", Title = "写作业", UpdatedAt = 5000, Deleted = true,
             RepeatRule = RepeatRules.None,
         }]);
-        var localEdit = NewTask("t1", 5000, "想复活的编辑");
+        var older = NewTask("t1", 1000, "更旧的编辑想复活");
 
-        var result = await _store.ApplyAsync(0, [localEdit]);
+        var result = await _store.ApplyAsync(0, [older]);
 
         Assert.Empty(result.Accepted);
         var rejected = Assert.Single(result.Rejected);
-        Assert.True(rejected.Server.Deleted, "被拒时应回传服务端墓碑，供本地删除");
+        Assert.True(rejected.Server.Deleted, "被拒时回传服务端较新的版本");
         var saved = Assert.Single(await _store.GetChangedSinceAsync(0, 0));
-        Assert.True(saved.Deleted, "服务端仍应保持删除，不能被本地编辑复活");
+        Assert.True(saved.Deleted);
     }
 
     [Fact]

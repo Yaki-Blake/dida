@@ -211,20 +211,16 @@ class MainActivity : Activity() {
         runAsync("上传中") {
             // 先看日历：手机里删掉的事件要变成墓碑，才能跟着这一轮推给电脑端
             val cal = CalendarSync.scan(applicationContext, db)
-            val dirty = db.dirty()
+            // 全量快照：每次都把本地整份日历（含墓碑）推上去，由服务器逐条按修改时间合并。
+            // 不再依赖 dirty 标记——漏标脏的条目也能上传，杜绝「有任务传不过去」。
+            val dirty = db.allIncludingDeleted()
             val alarmOps = db.alarmOps()
-            val dirtyNotes = db.dirtyNotes()
-            if (dirty.isEmpty() && alarmOps.isEmpty() && dirtyNotes.isEmpty()) {
-                return@runAsync Outcome(
-                    if (cal.removed > 0) "日历里删掉的 ${cal.removed} 条没有要上传的改动"
-                    else "没有待上传的改动",
-                    emptyList()
-                )
-            }
+            val dirtyNotes = db.allNotesIncludingDeleted()
 
             val sentAt = dirty.associate { it.id to it.updatedAt }
             val sentNoteAt = dirtyNotes.associate { it.id to it.updatedAt }
-            // since / note_since 取极大值：服务端只回 accepted，不推任何增量，避免「仅上传」顺带改了本地
+            // since / note_since 取极大值：服务端只回 accepted，不把它的整份日历灌回来，
+            // 保证「仅上传」不顺带改本地。
             val payload = Api.push(
                 base, token, Long.MAX_VALUE / 4, dirty, alarmOps,
                 notes = dirtyNotes, noteSince = Long.MAX_VALUE / 4,
@@ -305,9 +301,10 @@ class MainActivity : Activity() {
         runAsync("同步中") {
             // 先扫日历：手机里删掉的事件变成墓碑，才能跟着这一轮推给电脑端，电脑端那边也就消失了
             val cal = CalendarSync.scan(applicationContext, db)
-            val dirty = db.dirty()
+            // 全量快照：整份上传本地日历，服务器按修改时间合并，不依赖 dirty 标记。
+            val dirty = db.allIncludingDeleted()
             val alarmOps = db.alarmOps()
-            val dirtyNotes = db.dirtyNotes()
+            val dirtyNotes = db.allNotesIncludingDeleted()
             val sentAt = dirty.associate { it.id to it.updatedAt }
             val sentNoteAt = dirtyNotes.associate { it.id to it.updatedAt }
             val beforeAlarms = db.alarms()

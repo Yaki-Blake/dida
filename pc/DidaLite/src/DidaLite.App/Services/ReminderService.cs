@@ -91,20 +91,9 @@ public sealed class ReminderService
         switch (action)
         {
             case ReminderAction.Complete:
-                if (RepeatRules.IsRepeating(task.RepeatRule))
-                {
-                    // 重复任务：完成本次即推进到下一次，保持活跃
-                    if (!ReminderPlanner.AdvanceToNextOccurrence(task, now))
-                    {
-                        task.Done = true;
-                        task.RemindedAt = now;
-                    }
-                }
-                else
-                {
-                    task.Done = true;
-                    task.RemindedAt = now;
-                }
+                // 重复日程已展开成多条独立日程，这里只完成当前这一条。
+                task.Done = true;
+                task.RemindedAt = now;
                 break;
 
             case ReminderAction.SnoozeTenMinutes:

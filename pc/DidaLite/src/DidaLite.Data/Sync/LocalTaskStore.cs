@@ -143,6 +143,20 @@ public sealed class LocalTaskStore : ITaskStore
         return rows;
     }
 
+    /// <summary>读取该账号完整日历快照（全部任务，含墓碑），不看 rev。全量同步用。</summary>
+    public async Task<IReadOnlyList<TaskItem>> GetAllAsync(int userId, CancellationToken ct = default)
+    {
+        await EnsureAsync();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT {Columns} FROM task WHERE user_id = @uid ORDER BY rev";
+        cmd.Parameters.AddWithValue("@uid", userId);
+        var rows = new List<TaskItem>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) rows.Add(Read(reader));
+        return rows;
+    }
+
     /// <summary>该用户当前最大 rev：表内该用户最大值与该用户发号器取大，保证游标只进不退。</summary>
     public async Task<long> GetMaxRevAsync(int userId, CancellationToken ct = default)
     {
@@ -212,23 +226,18 @@ public sealed class LocalTaskStore : ITaskStore
     }
 
     /// <summary>
-    /// 传入版本是否压过服务端。规则（优先级从高到低）：
-    /// 1) 删除绝对优先：任一方是墓碑就按"删除胜出"裁决——云端已删则拒绝本地的复活/编辑并把墓碑回传，
-    ///    本地已删则接受墓碑、让云端也删。这样删除一定能传到另一端，不会出现"这边删了那边还在"。
-    /// 2) 新增本地优先：调用方在 server 为 null 时直接接受，这里不拦，本地新建的任务总能推上去。
-    /// 3) 编辑按时间：两边都活着时 updated_at 更晚者胜；同一时刻保留服务端（幂等，不来回抖动）。
+    /// 传入版本是否压过服务端。唯一规则：修改时间更新者胜（newer-wins）。
+    /// 删除只是带 deleted=1 的普通修改，同样按 updated_at 裁决——
+    /// 谁的删除/编辑时间更晚就听谁的，旧版本（哪怕是墓碑）不会被保留。
+    /// 两端与服务端三处用同一套规则，互不干扰；server 为 null（新增）时调用方直接接受。
+    /// 时间相同保留服务端，保证幂等、不来回抖动。
     /// </summary>
-    private static bool Wins(TaskItem incoming, TaskItem server)
-    {
-        var incomingDeleted = incoming.Deleted;
-        var serverDeleted = server.Deleted;
-
-        // 删除优先：谁删了听谁的；两边都删视为接受（墓碑幂等），只有服务端删则拒绝并回传墓碑。
-        if (incomingDeleted || serverDeleted) return incomingDeleted;
-
-        // 都活着：时间新者胜；完全相同则保留服务端。
-        return incoming.UpdatedAt != server.UpdatedAt && incoming.UpdatedAt > server.UpdatedAt;
-    }
+    /// <summary>
+    /// 时间更新者胜；时间相等也接受（全量快照里未改动的条目幂等回写，不当成"被拒"）。
+    /// 只有严格更旧的版本才被服务端挡下。
+    /// </summary>
+    private static bool Wins(TaskItem incoming, TaskItem server) =>
+        incoming.UpdatedAt >= server.UpdatedAt;
 
     private static bool IsBusy(SqliteException ex) =>
         ex.SqliteErrorCode is 5 or 6 || ex.Message.Contains("locked", StringComparison.OrdinalIgnoreCase);

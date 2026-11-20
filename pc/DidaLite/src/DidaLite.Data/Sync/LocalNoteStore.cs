@@ -76,6 +76,20 @@ public sealed class LocalNoteStore : INoteStore
         return rows;
     }
 
+    /// <summary>读取该账号全部便签快照（含墓碑），不看 rev。全量同步用。</summary>
+    public async Task<IReadOnlyList<NoteItem>> GetAllAsync(int userId, CancellationToken ct = default)
+    {
+        await EnsureAsync();
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT {Columns} FROM note_sync WHERE user_id = @uid ORDER BY rev";
+        cmd.Parameters.AddWithValue("@uid", userId);
+        var rows = new List<NoteItem>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) rows.Add(Read(reader));
+        return rows;
+    }
+
     public async Task<long> GetMaxRevAsync(int userId, CancellationToken ct = default)
     {
         await EnsureAsync();
@@ -154,12 +168,9 @@ public sealed class LocalNoteStore : INoteStore
     /// </summary>
     private static bool Wins(NoteItem incoming, NoteItem server)
     {
-        var incomingDeleted = incoming.Deleted;
-        var serverDeleted = server.Deleted;
-
-        if (incomingDeleted || serverDeleted) return incomingDeleted;
-
-        return incoming.UpdatedAt != server.UpdatedAt && incoming.UpdatedAt > server.UpdatedAt;
+        // 与任务一致：纯修改时间 newer-wins，删除也是普通修改。
+        // 时间相等也接受——全量快照里未改动的条目幂等回写，不当成"被拒"。
+        return incoming.UpdatedAt >= server.UpdatedAt;
     }
 
     private static bool IsBusy(SqliteException ex) =>

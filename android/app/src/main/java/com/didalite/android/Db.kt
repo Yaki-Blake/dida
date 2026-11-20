@@ -95,9 +95,14 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
         "COALESCE(start_at, due_at, 9223372036854775807) ASC"
     ).use { c -> buildList<Task> { while (c.moveToNext()) add(c.toTask()) } }
 
-    /** 待上传的本地改动。 */
+    /** 待上传的本地改动（增量模式保留备用）。 */
     fun dirty(): List<Task> = readableDatabase.query(
         "task", null, "dirty = 1", null, null, null, "updated_at ASC"
+    ).use { c -> buildList<Task> { while (c.moveToNext()) add(c.toTask()) } }
+
+    /** 全量快照：本地整份日历，含墓碑。每次同步都整份上传，杜绝增量漏传。 */
+    fun allIncludingDeleted(): List<Task> = readableDatabase.query(
+        "task", null, null, null, null, null, "updated_at ASC"
     ).use { c -> buildList<Task> { while (c.moveToNext()) add(c.toTask()) } }
 
     fun find(id: String): Task? = readableDatabase
@@ -110,10 +115,8 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
     )
 
     /**
-     * 落服务端版本，与电脑端 / 服务端同一套裁决：
-     * 1) 服务端是墓碑 → 无条件删除本地（哪怕本地有更晚编辑），删除绝对优先；
-     * 2) 本地是墓碑而服务端还活着 → 不覆盖，保住本地待推的删除；
-     * 3) 两边都活着 → 服务端 updated_at 不比本地旧才覆盖，本地没推的改动不被旧版本冲掉。
+     * 落服务端版本，与电脑端 / 服务端同一套裁决：唯一规则是修改时间更新者胜（newer-wins）。
+     * 删除只是带 deleted=1 的普通修改，同样按 updated_at 裁决；时间相等不动，保证幂等。
      * 用带 WHERE 的 UPSERT 一次落库，条件不满足时保持本地原样。
      */
     fun applyServer(task: Task) {
@@ -126,8 +129,7 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
               start_at = excluded.start_at, due_at = excluded.due_at, remind_at = excluded.remind_at,
               repeat_rule = excluded.repeat_rule, done = excluded.done, deleted = excluded.deleted,
               updated_at = excluded.updated_at, rev = excluded.rev, dirty = 0, all_day = excluded.all_day
-            WHERE excluded.deleted = 1
-               OR (task.deleted = 0 AND excluded.updated_at >= task.updated_at)
+            WHERE excluded.updated_at > task.updated_at
         """.trimIndent()
         writableDatabase.execSQL(sql, arrayOf(
             task.id, task.title, task.note, task.location,
@@ -324,6 +326,11 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
         .query("note", null, "dirty = 1", null, null, null, null)
         .use { c -> buildList<Note> { while (c.moveToNext()) add(c.toNote()) } }
 
+    /** 全量快照：本地全部便签，含墓碑。 */
+    fun allNotesIncludingDeleted(): List<Note> = readableDatabase
+        .query("note", null, null, null, null, null, null)
+        .use { c -> buildList<Note> { while (c.moveToNext()) add(c.toNote()) } }
+
     fun note(id: String): Note? = readableDatabase
         .query("note", null, "id = ?", arrayOf(id), null, null, null)
         .use { c -> if (c.moveToFirst()) c.toNote() else null }
@@ -346,10 +353,8 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
     /** 服务端版本比本地新才覆盖：便签两边都能改，不能让远端旧版本盖掉本地未推的改动。 */
     fun applyServerNote(note: Note) {
         val local = this.note(note.id)
-        // 墓碑优先：服务端删了就无条件删本地；本地墓碑不被云端旧版本复活；
-        // 两边都活着才按时间，本地不比云端旧就不覆盖（保住本地未推的改动）。
-        if (local != null && local.deleted && !note.deleted) return
-        if (!note.deleted && local != null && local.updatedAt >= note.updatedAt) return
+        // 与任务一致：纯修改时间 newer-wins，删除也是普通修改；时间相等不动。
+        if (local != null && local.updatedAt >= note.updatedAt) return
         saveNote(note.copy(dirty = false))
     }
 

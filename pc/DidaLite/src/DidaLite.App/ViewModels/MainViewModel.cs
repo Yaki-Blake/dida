@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using DidaLite.App.Services;
 using DidaLite.Core;
 using DidaLite.Core.Models;
+using DidaLite.Core.Recurring;
 using DidaLite.Core.Reminders;
 using DidaLite.Data;
 using DidaLite.Data.Sync;
@@ -89,11 +90,6 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>一键完成的撤销快照：按 id 把时间与完成状态写回去。</summary>
     private List<(string Id, long? StartAt, long? DueAt, long? RemindAt)>? _bulkUndo;
 
-    private long? _undoDueAt;
-    private long? _undoStartAt;
-    private long? _undoRemindAt;
-    private bool _undoWasAdvance;
-
     /// <summary>同步回来发现闹钟被手机端改过，用它把「专注 → 闹钟」列表刷一遍。</summary>
     private readonly AlarmService? _alarms;
 
@@ -146,7 +142,6 @@ public sealed partial class MainViewModel : ObservableObject
             IsUndoVisible = false;
             _pendingUndo = null;
             _bulkUndo = null;
-            _undoWasAdvance = false;
             Load();
         };
 
@@ -672,7 +667,13 @@ public sealed partial class MainViewModel : ObservableObject
         model.RemindedAt = null;
         model.Touch();
 
-        _store.Upsert(model);
+        // 重复日程：一次展开成多条独立日程，让日历上真的出现这一系列，
+        // 而不是原来"只有一条、勾选后原地跳到下一次"的摆设行为。
+        // 只对新建展开；编辑已有日程时不重新展开，避免把改过的实例冲掉。
+        var instances = IsNewTask && RepeatRules.IsRepeating(model.RepeatRule)
+            ? RecurrenceExpander.Expand(model)
+            : [model];
+        _store.UpsertMany(instances);
 
         if (IsNewTask)
         {
@@ -714,30 +715,8 @@ public sealed partial class MainViewModel : ObservableObject
 
         var model = vm.Model;
 
-        // 重复任务勾选 = 完成本次并推进到下一次，否则每天的任务点一次就永久消失
-        if (!model.Done && RepeatRules.IsRepeating(model.RepeatRule))
-        {
-            _undoStartAt = model.StartAt;
-            _undoDueAt = model.DueAt;
-            _undoRemindAt = model.RemindAt;
-            _undoWasAdvance = true;
-
-            if (ReminderPlanner.AdvanceToNextOccurrence(model, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
-            {
-                _store.Upsert(model);
-                vm.Refresh();
-
-                _pendingUndo = vm;
-                UndoText = $"已完成本次「{vm.Title}」，下次 {vm.DueText}";
-                IsUndoVisible = true;
-                _undoTimer.Stop();
-                _undoTimer.Start();
-                return;
-            }
-
-            _undoWasAdvance = false;
-        }
-
+        // 重复日程在新建时已展开成多条独立日程，这里只做普通的完成/取消完成。
+        // 不再"原地推进到下一次"——那正是用户说的摆设行为。
         model.Done = !model.Done;
         model.Touch();
         _store.Upsert(model);
@@ -800,9 +779,8 @@ public sealed partial class MainViewModel : ObservableObject
         {
             snapshot.Add((model.Id, model.StartAt, model.DueAt, model.RemindAt));
 
-            if (!RepeatRules.IsRepeating(model.RepeatRule)
-                || !ReminderPlanner.AdvanceToNextOccurrence(model, now))
-                model.Done = true;
+            // 重复日程已展开为多条独立日程，这里统一按普通完成处理。
+            model.Done = true;
 
             model.Touch();
             _store.Upsert(model);
@@ -846,24 +824,12 @@ public sealed partial class MainViewModel : ObservableObject
         if (_pendingUndo is not null)
         {
             var model = _pendingUndo.Model;
-
-            if (_undoWasAdvance)
-            {
-                model.StartAt = _undoStartAt;
-                model.DueAt = _undoDueAt;
-                model.RemindAt = _undoRemindAt;
-            }
-            else
-            {
-                model.Done = false;
-            }
-
+            model.Done = false;
             model.Touch();
             _store.Upsert(model);
             _pendingUndo = null;
         }
 
-        _undoWasAdvance = false;
         Load();
     }
 

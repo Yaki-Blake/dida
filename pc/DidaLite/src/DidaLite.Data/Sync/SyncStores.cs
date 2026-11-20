@@ -11,6 +11,9 @@ public interface ITaskStore
     /// <summary>读取该用户 rev 大于游标的全部任务，含墓碑。</summary>
     Task<IReadOnlyList<TaskItem>> GetChangedSinceAsync(int userId, long sinceRev, CancellationToken ct = default);
 
+    /// <summary>读取该账号完整日历快照（全部任务，含墓碑）——全量同步用，不看游标。</summary>
+    Task<IReadOnlyList<TaskItem>> GetAllAsync(int userId, CancellationToken ct = default);
+
     /// <summary>该用户当前最大 rev，用作客户端游标上限。</summary>
     Task<long> GetMaxRevAsync(int userId, CancellationToken ct = default);
 
@@ -43,6 +46,9 @@ public interface INoteStore
 {
     /// <summary>读取该用户 rev 大于游标的全部便签，含墓碑。</summary>
     Task<IReadOnlyList<NoteItem>> GetChangedSinceAsync(int userId, long sinceRev, CancellationToken ct = default);
+
+    /// <summary>读取该账号全部便签快照（含墓碑）——全量同步用，不看游标。</summary>
+    Task<IReadOnlyList<NoteItem>> GetAllAsync(int userId, CancellationToken ct = default);
 
     /// <summary>该用户当前最大便签 rev，用作客户端便签游标上限。</summary>
     Task<long> GetMaxRevAsync(int userId, CancellationToken ct = default);

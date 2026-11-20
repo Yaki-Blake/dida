@@ -222,15 +222,17 @@ public sealed class SyncClient
     {
         EnsureAccountRecorded();
 
-        var dirty = _store.GetDirty();
+        // 全量快照同步：每次上传本端整份日历（含墓碑），服务器按修改时间逐条合并。
+        // 这样任何一条都不会因为「没标脏 / 标脏失败 / 游标错位」而漏传——不存在增量漏同步。
+        var dirty = _store.GetAll();
         var since = _store.GetCursor();
 
         // 闹钟跟着每轮同步整批上传：服务器拿它当该账号的快照，手机端「闹钟」页就是照这份渲染。
         // 已删除的不传，服务器会给没出现的旧闹钟自己打墓碑。
         var alarms = _store.GetAlarms().Where(a => !a.Deleted).ToList();
 
-        // 便签两边都能改，所以只推脏行；墓碑也要推，否则对面永远删不掉。
-        var dirtyNotes = _store.GetDirtyNotes();
+        // 便签同任务：整份上传（含墓碑），由服务器按修改时间合并。
+        var dirtyNotes = _store.GetAllNotes();
 
         var body = new SyncRequest
         {

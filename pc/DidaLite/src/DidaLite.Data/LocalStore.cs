@@ -232,8 +232,8 @@ public sealed class LocalStore
     }
 
     /// <summary>
-    /// 落服务端版本。删除绝对优先：云端墓碑无条件删除本地（哪怕本地有更晚编辑），本地墓碑不被云端旧版本复活；
-    /// 两边都活着时才按时间，云端不比本地旧才覆盖，保住本地未推的改动。
+    /// 落服务端版本。唯一规则：修改时间更新者胜（newer-wins），删除也是带时间戳的普通修改。
+    /// 云端版本更新就覆盖本地（含把本地删除/复活），否则保留本地。时间相等不动，保证幂等。
     /// </summary>
     public void ApplyServer(TaskItem task)
     {
@@ -250,8 +250,7 @@ public sealed class LocalStore
               deleted = excluded.deleted, updated_at = excluded.updated_at,
               rev = excluded.rev, dirty = 0,
               reminded_at = excluded.reminded_at, all_day = excluded.all_day
-            WHERE excluded.deleted = 1
-               OR (task.deleted = 0 AND excluded.updated_at >= task.updated_at)
+            WHERE excluded.updated_at > task.updated_at
             """;
         Bind(cmd, task, false);
         cmd.ExecuteNonQuery();
@@ -454,6 +453,18 @@ public sealed class LocalStore
         return list;
     }
 
+    /// <summary>全量快照用：该端全部便签（含墓碑），不做游标裁剪。</summary>
+    public List<NoteItem> GetAllNotes()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT {NoteColumns} FROM note";
+        var list = new List<NoteItem>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) list.Add(MapNote(reader));
+        return list;
+    }
+
     public List<NoteItem> GetDirtyNotes()
     {
         using var conn = Open();
@@ -515,7 +526,8 @@ public sealed class LocalStore
     }
 
     /// <summary>
-    /// 落服务端版本。与任务同规则：删除墓碑绝对优先，两边都活着才按时间（服务端不比本地新就不动）。
+    /// 落服务端版本。与任务同规则：纯修改时间 newer-wins，删除也是普通修改。
+    /// 服务端版本更新就覆盖，否则不动（时间相等也不动，保证幂等）。
     /// </summary>
     public bool ApplyServerNote(NoteItem note)
     {
@@ -532,8 +544,7 @@ public sealed class LocalStore
               updated_at = excluded.updated_at,
               rev = excluded.rev,
               dirty = 0
-            WHERE excluded.deleted = 1
-               OR (note.deleted = 0 AND excluded.updated_at > note.updated_at)
+            WHERE excluded.updated_at > note.updated_at
             """;
         cmd.Parameters.AddWithValue("$id", note.Id);
         cmd.Parameters.AddWithValue("$title", note.Title);

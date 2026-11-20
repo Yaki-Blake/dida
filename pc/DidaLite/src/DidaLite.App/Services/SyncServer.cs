@@ -150,8 +150,8 @@ public sealed class SyncServer : IDisposable
     {
         var since = long.TryParse(ctx.Request.Query["since"], out var parsed) ? parsed : 0;
 
-        // 桌面内嵌服务是单用户本地模式，固定用 user_id=0 槽位
-        var tasks = await _store.GetChangedSinceAsync(0, since);
+        // 全量快照：返回该账号（本地模式固定槽位 0）的完整日历，不看 since 游标。
+        var tasks = await _store.GetAllAsync(0);
         var maxRev = await _store.GetMaxRevAsync(0);
 
         await ctx.Response.WriteAsJsonAsync(Payload(maxRev, null, null, tasks, Alarms()), Json);
@@ -170,7 +170,8 @@ public sealed class SyncServer : IDisposable
         // 桌面内嵌服务是单用户本地模式，固定用 user_id=0 槽位
         var apply = await _store.ApplyAsync(0, request.Changes);
         ApplyAlarmChanges(request.AlarmChanges);
-        var tasks = await _store.GetChangedSinceAsync(0, request.Since);
+        // 全量快照：把完整日历回给客户端，逐条按修改时间合并。
+        var tasks = await _store.GetAllAsync(0);
 
         var accepted = apply.Accepted.Select(a => new { id = a.Id, rev = a.Rev });
         var rejected = apply.Rejected.Select(r => new { id = r.Id, reason = r.Reason, server = r.Server });
