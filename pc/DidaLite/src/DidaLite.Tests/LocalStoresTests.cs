@@ -75,6 +75,70 @@ public sealed class LocalStoresTests : IDisposable
         Assert.True(Assert.Single(await _store.GetChangedSinceAsync(0, 0)).Deleted);
     }
 
+    // ---------- 新裁决规则：删除绝对优先 / 新增本地优先 / 编辑时间新者胜 ----------
+
+    [Fact]
+    public async Task Apply_LocalDelete_BeatsNewerServerEdit_AndWins()
+    {
+        // 服务端有一条更新时间更晚的编辑（t=5000），本地在更早的时刻删了它（t=1000）。
+        // 旧规则按时间戳会让本地删除被拒、任务复活；新规则删除绝对优先，删除必须能推上去。
+        await _store.ApplyAsync(0, [NewTask("t1", 5000, "服务端的编辑")]);
+        var localDelete = new TaskItem
+        {
+            Id = "t1", Title = "写作业", UpdatedAt = 1000, Deleted = true,
+            RepeatRule = RepeatRules.None,
+        };
+
+        var result = await _store.ApplyAsync(0, [localDelete]);
+
+        Assert.Single(result.Accepted);
+        Assert.Empty(result.Rejected);
+        var saved = Assert.Single(await _store.GetChangedSinceAsync(0, 0));
+        Assert.True(saved.Deleted, "本地删除应覆盖服务端更晚的编辑，让删除传播到所有端");
+    }
+
+    [Fact]
+    public async Task Apply_ServerDelete_RejectsNewerLocalEdit_AndSendsTombstoneBack()
+    {
+        // 服务端已删（墓碑，t=1000），本地拿一条更晚的编辑来复活（t=5000）。
+        // 删除绝对优先：拒绝这条编辑，并把服务端墓碑回传，让本地跟着删掉。
+        await _store.ApplyAsync(0, [new TaskItem
+        {
+            Id = "t1", Title = "写作业", UpdatedAt = 1000, Deleted = true,
+            RepeatRule = RepeatRules.None,
+        }]);
+        var localEdit = NewTask("t1", 5000, "想复活的编辑");
+
+        var result = await _store.ApplyAsync(0, [localEdit]);
+
+        Assert.Empty(result.Accepted);
+        var rejected = Assert.Single(result.Rejected);
+        Assert.True(rejected.Server.Deleted, "被拒时应回传服务端墓碑，供本地删除");
+        var saved = Assert.Single(await _store.GetChangedSinceAsync(0, 0));
+        Assert.True(saved.Deleted, "服务端仍应保持删除，不能被本地编辑复活");
+    }
+
+    [Fact]
+    public async Task Apply_BothAlive_NewerEditWins()
+    {
+        // 两边都活着、没有删除：仍然按更新时间，新者胜（用户确认的编辑冲突规则）。
+        await _store.ApplyAsync(0, [NewTask("t1", 1000, "旧标题")]);
+        var result = await _store.ApplyAsync(0, [NewTask("t1", 9000, "新标题")]);
+
+        Assert.Single(result.Accepted);
+        Assert.Equal("新标题", Assert.Single(await _store.GetChangedSinceAsync(0, 0)).Title);
+    }
+
+    [Fact]
+    public async Task Apply_LocalNew_IdAbsentOnServer_IsAccepted()
+    {
+        // 新增本地优先：服务端没有这个 id，直接接受，本地新建的任务总能推上去。
+        var result = await _store.ApplyAsync(0, [NewTask("brand-new", 1000, "本地新建")]);
+
+        Assert.Single(result.Accepted);
+        Assert.Equal("本地新建", Assert.Single(await _store.GetChangedSinceAsync(0, 0)).Title);
+    }
+
     [Fact]
     public async Task MaxRev_KeepsGrowing_AfterEverythingDeleted()
     {

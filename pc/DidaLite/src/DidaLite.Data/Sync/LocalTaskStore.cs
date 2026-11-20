@@ -211,11 +211,23 @@ public sealed class LocalTaskStore : ITaskStore
         return result;
     }
 
-    /// <summary>传入版本是否压过服务端：更新时间更晚者胜；同一时刻删除优先；再相同时保留服务端。</summary>
+    /// <summary>
+    /// 传入版本是否压过服务端。规则（优先级从高到低）：
+    /// 1) 删除绝对优先：任一方是墓碑就按"删除胜出"裁决——云端已删则拒绝本地的复活/编辑并把墓碑回传，
+    ///    本地已删则接受墓碑、让云端也删。这样删除一定能传到另一端，不会出现"这边删了那边还在"。
+    /// 2) 新增本地优先：调用方在 server 为 null 时直接接受，这里不拦，本地新建的任务总能推上去。
+    /// 3) 编辑按时间：两边都活着时 updated_at 更晚者胜；同一时刻保留服务端（幂等，不来回抖动）。
+    /// </summary>
     private static bool Wins(TaskItem incoming, TaskItem server)
     {
-        if (incoming.UpdatedAt != server.UpdatedAt) return incoming.UpdatedAt > server.UpdatedAt;
-        return incoming.Deleted && !server.Deleted;
+        var incomingDeleted = incoming.Deleted;
+        var serverDeleted = server.Deleted;
+
+        // 删除优先：谁删了听谁的；两边都删视为接受（墓碑幂等），只有服务端删则拒绝并回传墓碑。
+        if (incomingDeleted || serverDeleted) return incomingDeleted;
+
+        // 都活着：时间新者胜；完全相同则保留服务端。
+        return incoming.UpdatedAt != server.UpdatedAt && incoming.UpdatedAt > server.UpdatedAt;
     }
 
     private static bool IsBusy(SqliteException ex) =>

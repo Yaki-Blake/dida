@@ -149,10 +149,17 @@ public sealed class LocalNoteStore : INoteStore
         return result;
     }
 
+    /// <summary>
+    /// 与任务一致的裁决：删除墓碑绝对优先（谁删了听谁的），两边都活着才按更新时间新者胜。
+    /// </summary>
     private static bool Wins(NoteItem incoming, NoteItem server)
     {
-        if (incoming.UpdatedAt != server.UpdatedAt) return incoming.UpdatedAt > server.UpdatedAt;
-        return incoming.Deleted && !server.Deleted;
+        var incomingDeleted = incoming.Deleted;
+        var serverDeleted = server.Deleted;
+
+        if (incomingDeleted || serverDeleted) return incomingDeleted;
+
+        return incoming.UpdatedAt != server.UpdatedAt && incoming.UpdatedAt > server.UpdatedAt;
     }
 
     private static bool IsBusy(SqliteException ex) =>

@@ -231,7 +231,10 @@ public sealed class LocalStore
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>落服务端版本：本地在这之后没有再改过才覆盖，否则保留本地待推的那一份。</summary>
+    /// <summary>
+    /// 落服务端版本。删除绝对优先：云端墓碑无条件删除本地（哪怕本地有更晚编辑），本地墓碑不被云端旧版本复活；
+    /// 两边都活着时才按时间，云端不比本地旧才覆盖，保住本地未推的改动。
+    /// </summary>
     public void ApplyServer(TaskItem task)
     {
         using var conn = Open();
@@ -247,7 +250,8 @@ public sealed class LocalStore
               deleted = excluded.deleted, updated_at = excluded.updated_at,
               rev = excluded.rev, dirty = 0,
               reminded_at = excluded.reminded_at, all_day = excluded.all_day
-            WHERE excluded.updated_at >= task.updated_at
+            WHERE excluded.deleted = 1
+               OR (task.deleted = 0 AND excluded.updated_at >= task.updated_at)
             """;
         Bind(cmd, task, false);
         cmd.ExecuteNonQuery();
@@ -511,8 +515,7 @@ public sealed class LocalStore
     }
 
     /// <summary>
-    /// 落服务端版本。便签两边都能改，所以走时间戳裁决：
-    /// 服务端那一份不比本地新就不动，保证本地未推的改动不会被远端旧版本覆盖。
+    /// 落服务端版本。与任务同规则：删除墓碑绝对优先，两边都活着才按时间（服务端不比本地新就不动）。
     /// </summary>
     public bool ApplyServerNote(NoteItem note)
     {
@@ -529,7 +532,8 @@ public sealed class LocalStore
               updated_at = excluded.updated_at,
               rev = excluded.rev,
               dirty = 0
-            WHERE excluded.updated_at > note.updated_at
+            WHERE excluded.deleted = 1
+               OR (note.deleted = 0 AND excluded.updated_at > note.updated_at)
             """;
         cmd.Parameters.AddWithValue("$id", note.Id);
         cmd.Parameters.AddWithValue("$title", note.Title);

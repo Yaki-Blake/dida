@@ -109,11 +109,32 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
         "task", null, task.toValues(dirty = true), SQLiteDatabase.CONFLICT_REPLACE
     )
 
-    /** 服务端版本无条件覆盖本地（4.2 冲突规则第 3 条）。 */
+    /**
+     * 落服务端版本，与电脑端 / 服务端同一套裁决：
+     * 1) 服务端是墓碑 → 无条件删除本地（哪怕本地有更晚编辑），删除绝对优先；
+     * 2) 本地是墓碑而服务端还活着 → 不覆盖，保住本地待推的删除；
+     * 3) 两边都活着 → 服务端 updated_at 不比本地旧才覆盖，本地没推的改动不被旧版本冲掉。
+     * 用带 WHERE 的 UPSERT 一次落库，条件不满足时保持本地原样。
+     */
     fun applyServer(task: Task) {
-        writableDatabase.insertWithOnConflict(
-            "task", null, task.toValues(dirty = false), SQLiteDatabase.CONFLICT_REPLACE
-        )
+        val sql = """
+            INSERT INTO task (id, title, note, location, start_at, due_at, remind_at, repeat_rule,
+                              done, deleted, updated_at, rev, dirty, all_day)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              title = excluded.title, note = excluded.note, location = excluded.location,
+              start_at = excluded.start_at, due_at = excluded.due_at, remind_at = excluded.remind_at,
+              repeat_rule = excluded.repeat_rule, done = excluded.done, deleted = excluded.deleted,
+              updated_at = excluded.updated_at, rev = excluded.rev, dirty = 0, all_day = excluded.all_day
+            WHERE excluded.deleted = 1
+               OR (task.deleted = 0 AND excluded.updated_at >= task.updated_at)
+        """.trimIndent()
+        writableDatabase.execSQL(sql, arrayOf(
+            task.id, task.title, task.note, task.location,
+            task.startAt, task.dueAt, task.remindAt, task.repeatRule,
+            if (task.done) 1 else 0, if (task.deleted) 1 else 0,
+            task.updatedAt, task.rev, if (task.allDay) 1 else 0,
+        ))
     }
 
     /**
@@ -325,7 +346,10 @@ class Db(context: Context) : SQLiteOpenHelper(context.applicationContext, "dida.
     /** 服务端版本比本地新才覆盖：便签两边都能改，不能让远端旧版本盖掉本地未推的改动。 */
     fun applyServerNote(note: Note) {
         val local = this.note(note.id)
-        if (local != null && local.updatedAt >= note.updatedAt) return
+        // 墓碑优先：服务端删了就无条件删本地；本地墓碑不被云端旧版本复活；
+        // 两边都活着才按时间，本地不比云端旧就不覆盖（保住本地未推的改动）。
+        if (local != null && local.deleted && !note.deleted) return
+        if (!note.deleted && local != null && local.updatedAt >= note.updatedAt) return
         saveNote(note.copy(dirty = false))
     }
 
