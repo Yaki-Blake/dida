@@ -218,6 +218,7 @@ class MainActivity : Activity() {
             val dirtyNotes = db.allNotesIncludingDeleted()
 
             val sentAt = dirty.associate { it.id to it.updatedAt }
+            val sentRev = dirty.associate { it.id to it.rev }
             val sentNoteAt = dirtyNotes.associate { it.id to it.updatedAt }
             // since / note_since 取极大值：服务端只回 accepted，不把它的整份日历灌回来，
             // 保证「仅上传」不顺带改本地。
@@ -230,9 +231,10 @@ class MainActivity : Activity() {
             payload.rejected.forEach { db.applyServer(it) }
             db.clearAlarmOps()
 
-            val acceptedIds = payload.accepted.map { it.first }.toSet()
+            val uploaded = uploadedCount(payload.accepted, sentRev)
+            val changedIds = payload.accepted.filter { (id, rev) -> sentRev[id] != rev }.map { it.first }.toSet()
             val rows = mutableListOf<ChangeRow>()
-            dirty.filter { it.id in acceptedIds }
+            dirty.filter { it.id in changedIds }
                 .forEach { rows.add(ChangeRow("↑", it.title, Ui.ACCENT_DEEP)) }
             payload.rejected.forEach { rows.add(ChangeRow("↺", it.title, Ui.WARN)) }
             if (alarmOps.isNotEmpty()) {
@@ -249,7 +251,7 @@ class MainActivity : Activity() {
             val noteNote = if (dirtyNotes.isEmpty()) "" else "，便签 ${payload.noteAccepted.size} 条"
             val calNote = if (cal.removed > 0) "，日历删除 ${cal.removed} 条" else ""
             Outcome(
-                "上传任务 ${payload.accepted.size} 条$calNote$alarmNote$noteNote，被拒 ${payload.rejected.size} 条（已改用电脑版本）",
+                "上传任务 $uploaded 条$calNote$alarmNote$noteNote，被拒 ${payload.rejected.size} 条（已改用电脑版本）",
                 rows,
             )
         }
@@ -261,6 +263,7 @@ class MainActivity : Activity() {
             // 日历里删掉的日程先打上墓碑，「仅下载」不外传，等下一轮上传时推给电脑端
             val cal = CalendarSync.scan(applicationContext, db)
             val beforeAlarms = db.alarms()
+            val beforeTasks = db.allIncludingDeleted().associate { it.id to it.updatedAt }
             val beforeNotes = db.notes().associate { it.id to it.updatedAt }
             val payload = Api.pull(base, token, db.cursor(), db.noteCursor())
             payload.tasks.forEach { db.applyServer(it) }
@@ -270,8 +273,10 @@ class MainActivity : Activity() {
             if (payload.noteMaxRev > 0) db.setNoteCursor(payload.noteMaxRev)
 
             val noteChanges = changedCount(beforeNotes, db.notes().associate { it.id to it.updatedAt })
+            val changedIds = changedTaskIds(beforeTasks, payload.tasks)
+            val changedTasks = payload.tasks.filter { it.id in changedIds }
 
-            val rows = payload.tasks.mapTo(mutableListOf()) { task ->
+            val rows = changedTasks.mapTo(mutableListOf()) { task ->
                 if (task.deleted) {
                     ChangeRow("×", task.title, Ui.MUTED)
                 } else {
@@ -289,7 +294,7 @@ class MainActivity : Activity() {
             writeCalendarQuietly()
             val alarmChanged = beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }
             Outcome(
-                summaryForDownload(payload.tasks, alarmChanged, payload.alarms.size, noteChanges) +
+                summaryForDownload(changedTasks, alarmChanged, payload.alarms.size, noteChanges) +
                     if (cal.removed > 0) "，日历删除 ${cal.removed} 条待上传" else "",
                 rows,
             )
@@ -306,7 +311,9 @@ class MainActivity : Activity() {
             val alarmOps = db.alarmOps()
             val dirtyNotes = db.allNotesIncludingDeleted()
             val sentAt = dirty.associate { it.id to it.updatedAt }
+            val sentRev = dirty.associate { it.id to it.rev }
             val sentNoteAt = dirtyNotes.associate { it.id to it.updatedAt }
+            val sentNoteRev = dirtyNotes.associate { it.id to it.rev }
             val beforeAlarms = db.alarms()
             val beforeNotes = db.notes().associate { it.id to it.updatedAt }
             val payload = Api.push(
@@ -324,19 +331,24 @@ class MainActivity : Activity() {
             db.clearAlarmOps()
 
             val noteChanges = changedCount(beforeNotes, db.notes().associate { it.id to it.updatedAt })
+            val uploaded = uploadedCount(payload.accepted, sentRev)
+            val noteUploaded = uploadedCount(payload.noteAccepted, sentNoteRev)
+            val uploadedIds = payload.accepted.filter { (id, rev) -> sentRev[id] != rev }.map { it.first }.toSet()
+            val downloadedIds = changedTaskIds(sentAt, payload.tasks).toMutableSet()
+            payload.rejected.forEach { downloadedIds.add(it.id) }
+            val downloadedTasks = payload.tasks.filter { it.id in downloadedIds }
 
-            val acceptedIds = payload.accepted.map { it.first }.toSet()
             val rows = mutableListOf<ChangeRow>()
-            dirty.filter { it.id in acceptedIds }
+            dirty.filter { it.id in uploadedIds }
                 .forEach { rows.add(ChangeRow("↑", it.title, Ui.ACCENT_DEEP)) }
             if (alarmOps.isNotEmpty()) {
                 rows.add(ChangeRow("↑", "闹钟改动 ${alarmOps.size} 个", Ui.ACCENT_DEEP))
             }
             if (dirtyNotes.isNotEmpty()) {
-                rows.add(ChangeRow("↑", "便签 ${dirtyNotes.size} 条", Ui.ACCENT_DEEP))
+                rows.add(ChangeRow("↑", "便签 $noteUploaded 条", Ui.ACCENT_DEEP))
             }
             payload.rejected.forEach { rows.add(ChangeRow("↺", it.title, Ui.WARN)) }
-            payload.tasks.forEach { task ->
+            downloadedTasks.forEach { task ->
                 if (task.deleted) {
                     rows.add(ChangeRow("×", task.title, Ui.MUTED))
                 } else {
@@ -353,18 +365,18 @@ class MainActivity : Activity() {
 
             ReminderScheduler.rescheduleAll(applicationContext)
             writeCalendarQuietly()
-            val deleted = payload.tasks.count { it.deleted }
+            val deleted = downloadedTasks.count { it.deleted }
             // 闹钟 / 便签 / 任务是三条独立通道：任务的 0 条不代表另外两条没同步，摘要里分开写清楚
             val alarmChanged = beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }
-            val sb = StringBuilder("上传任务 ${payload.accepted.size} 条，下载任务 ${payload.tasks.size} 条")
+            val sb = StringBuilder("上传任务 $uploaded 条，下载任务 ${downloadedTasks.size} 条")
             if (deleted > 0) sb.append("（含删除 $deleted 条）")
             if (cal.removed > 0) sb.append("，日历删除 ${cal.removed} 条")
             if (alarmOps.isNotEmpty()) sb.append("，闹钟改动 ${alarmOps.size} 个")
             if (alarmChanged) sb.append("，闹钟 ${payload.alarms.size} 个")
             if (dirtyNotes.isNotEmpty() || noteChanges > 0) {
-                sb.append("，便签 上传 ${dirtyNotes.size} / 下载 $noteChanges 条")
+                sb.append("，便签 上传 $noteUploaded / 下载 $noteChanges 条")
             }
-            val noChange = payload.accepted.isEmpty() && payload.tasks.isEmpty() &&
+            val noChange = uploaded == 0 && downloadedTasks.isEmpty() &&
                 alarmOps.isEmpty() && !alarmChanged && payload.rejected.isEmpty() &&
                 dirtyNotes.isEmpty() && noteChanges == 0 && cal.removed == 0
             Outcome(if (noChange) "已是最新，没有变化" else sb.toString(), rows)
@@ -374,6 +386,14 @@ class MainActivity : Activity() {
     /** 按 (id → updated_at) 的映射比较前后差异：新增、删除、改过都算一条。 */
     private fun changedCount(before: Map<String, Long>, after: Map<String, Long>): Int =
         (before.keys + after.keys).count { before[it] != after[it] }
+
+    /** 全量快照里服务端会把没变的条目也回传；只有 rev 变了的才算真正上传。 */
+    private fun uploadedCount(accepted: List<Pair<String, Long>>, sentRev: Map<String, Long>): Int =
+        accepted.count { (id, rev) -> sentRev[id] != rev }
+
+    /** 真正被服务端版本改写的任务 id；全量快照里绝大多数条目不该出现在结果里。 */
+    private fun changedTaskIds(before: Map<String, Long>, tasks: List<Task>): Set<String> =
+        tasks.filter { before[it.id] != it.updatedAt }.map { it.id }.toSet()
 
     /** 同步完顺手把任务写进系统日历；没授权或没有可写日历就安静跳过。 */
     private fun writeCalendarQuietly() {

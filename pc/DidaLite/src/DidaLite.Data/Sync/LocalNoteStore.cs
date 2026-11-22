@@ -149,6 +149,15 @@ public sealed class LocalNoteStore : INoteStore
                 continue;
             }
 
+            // 全量快照里没变的便签不分配新 rev、不计入上传；仍回传现有 rev 供客户端清脏。
+            if (server is not null && HasSameContent(change, server))
+            {
+                change.Rev = server.Rev;
+                existing[change.Id] = change;
+                result.Accepted.Add(new AcceptedChange(change.Id, server.Rev));
+                continue;
+            }
+
             seq++;
             change.Rev = seq;
             await UpsertAsync(conn, tx, userId, change, ct);
@@ -172,6 +181,14 @@ public sealed class LocalNoteStore : INoteStore
         // 时间相等也接受——全量快照里未改动的条目幂等回写，不当成"被拒"。
         return incoming.UpdatedAt >= server.UpdatedAt;
     }
+
+    /// <summary>内容完全一致（含修改时间）——全量快照里的未改动便签，不消耗新 rev。</summary>
+    private static bool HasSameContent(NoteItem a, NoteItem b) =>
+        a.UpdatedAt == b.UpdatedAt &&
+        a.Title == b.Title &&
+        a.Body == b.Body &&
+        a.Pinned == b.Pinned &&
+        a.Deleted == b.Deleted;
 
     private static bool IsBusy(SqliteException ex) =>
         ex.SqliteErrorCode is 5 or 6 || ex.Message.Contains("locked", StringComparison.OrdinalIgnoreCase);

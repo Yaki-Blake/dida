@@ -250,16 +250,24 @@ public sealed class SyncClient
         var payload = await response.Content.ReadFromJsonAsync<SyncResponse>(Json, ct)
                       ?? throw new InvalidOperationException("服务端返回了空内容");
 
-        // 记下发出去时的修改时间：推送途中又改过的行不该被误清 dirty
+        // 记下发出去时的修改时间与版本：推送途中又改过的行不该被误清 dirty；
+        // rev 变了才算真的上传，内容完全一致的条目服务端会原样回传旧 rev。
         var sentAt = dirty.ToDictionary(t => t.Id, t => t.UpdatedAt);
+        var sentRev = dirty.ToDictionary(t => t.Id, t => t.Rev);
 
         foreach (var accepted in payload.Accepted ?? [])
             _store.MarkSynced(accepted.Id, accepted.Rev, sentAt.GetValueOrDefault(accepted.Id));
 
+        var taskUploaded = (payload.Accepted ?? []).Count(a =>
+            !sentRev.TryGetValue(a.Id, out var oldRev) || oldRev != a.Rev);
+
         foreach (var rejected in payload.Rejected ?? [])
             if (rejected.Server is not null) _store.ApplyServer(rejected.Server);
 
-        foreach (var task in payload.Tasks ?? []) _store.ApplyServer(task);
+        // 全量快照里的绝大多数条目和本地一样，ApplyServer 会返回 false；只把真正变化的计入"拉取"。
+        var taskPulled = 0;
+        foreach (var task in payload.Tasks ?? [])
+            if (_store.ApplyServer(task)) taskPulled++;
 
         // 手机的开关 / 删除会随服务器回来；本地闹钟是出处，只接受比本地新的那条
         var alarmChanges = _store.MergeAlarmsFromServer(payload.Alarms ?? []);
@@ -284,7 +292,7 @@ public sealed class SyncClient
         var switched = _switchedThisRun;
         _switchedThisRun = false;
 
-        return new SyncStats(payload.Accepted?.Count ?? 0, payload.Rejected?.Count ?? 0, payload.Tasks?.Count ?? 0,
+        return new SyncStats(taskUploaded, payload.Rejected?.Count ?? 0, taskPulled,
             switched, alarmChanges, notesApplied);
     }
 

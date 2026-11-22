@@ -211,6 +211,18 @@ public sealed class LocalTaskStore : ITaskStore
                 continue;
             }
 
+            // 全量快照里绝大多数条目没变。内容与修改时间都完全一致时不分配新 rev，
+            // 也不算本轮上传——否则每次同步都会把整份日历的 rev 推高一遍，
+            // 界面显示「上传 134 条」但其实什么都没改。仍回传服务端现有 rev，
+            // 让客户端可以清掉 dirty、对齐版本号。
+            if (server is not null && HasSameContent(change, server))
+            {
+                change.Rev = server.Rev;
+                existing[change.Id] = change;
+                result.Accepted.Add(new AcceptedChange(change.Id, server.Rev));
+                continue;
+            }
+
             seq++;
             change.Rev = seq;
             await UpsertAsync(conn, tx, userId, change, ct);
@@ -238,6 +250,20 @@ public sealed class LocalTaskStore : ITaskStore
     /// </summary>
     private static bool Wins(TaskItem incoming, TaskItem server) =>
         incoming.UpdatedAt >= server.UpdatedAt;
+
+    /// <summary>内容完全一致（含修改时间）——全量快照里的未改动条目，不消耗新 rev。</summary>
+    private static bool HasSameContent(TaskItem a, TaskItem b) =>
+        a.UpdatedAt == b.UpdatedAt &&
+        a.Title == b.Title &&
+        a.Note == b.Note &&
+        a.Location == b.Location &&
+        a.StartAt == b.StartAt &&
+        a.DueAt == b.DueAt &&
+        a.AllDay == b.AllDay &&
+        a.RemindAt == b.RemindAt &&
+        a.RepeatRule == b.RepeatRule &&
+        a.Done == b.Done &&
+        a.Deleted == b.Deleted;
 
     private static bool IsBusy(SqliteException ex) =>
         ex.SqliteErrorCode is 5 or 6 || ex.Message.Contains("locked", StringComparison.OrdinalIgnoreCase);

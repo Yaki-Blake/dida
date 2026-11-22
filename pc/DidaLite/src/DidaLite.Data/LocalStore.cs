@@ -235,7 +235,8 @@ public sealed class LocalStore
     /// 落服务端版本。唯一规则：修改时间更新者胜（newer-wins），删除也是带时间戳的普通修改。
     /// 云端版本更新就覆盖本地（含把本地删除/复活），否则保留本地。时间相等不动，保证幂等。
     /// </summary>
-    public void ApplyServer(TaskItem task)
+    /// <summary>返回 true 表示本地真的被服务端版本改写；无变化时返回 false，供同步统计使用。</summary>
+    public bool ApplyServer(TaskItem task)
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
@@ -253,7 +254,7 @@ public sealed class LocalStore
             WHERE excluded.updated_at > task.updated_at
             """;
         Bind(cmd, task, false);
-        cmd.ExecuteNonQuery();
+        return cmd.ExecuteNonQuery() > 0;
     }
 
     public string? GetMeta(string key)

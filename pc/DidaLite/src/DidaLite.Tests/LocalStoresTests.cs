@@ -54,6 +54,22 @@ public sealed class LocalStoresTests : IDisposable
     }
 
     [Fact]
+    public async Task Apply_IdenticalFullSnapshot_DoesNotBumpRev()
+    {
+        var first = await _store.ApplyAsync(0, [NewTask("t1", 1000)]);
+        var before = await _store.GetMaxRevAsync(0);
+
+        // 全量快照重传同一条：内容、时间完全一致，不应再分配新 rev
+        var again = await _store.ApplyAsync(0, [NewTask("t1", 1000)]);
+
+        Assert.Single(again.Accepted); // 仍回传接受，让客户端能清 dirty / 对齐 rev
+        Assert.Equal(first.Accepted[0].Rev, again.Accepted[0].Rev);
+        Assert.Equal(before, again.MaxRev);
+        Assert.Equal(before, await _store.GetMaxRevAsync(0));
+        Assert.Empty(again.Rejected);
+    }
+
+    [Fact]
     public async Task Apply_OlderUpdate_IsRejectedWithServerCopy()
     {
         await _store.ApplyAsync(0, [NewTask("t1", 2000, "新版本")]);
