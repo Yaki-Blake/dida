@@ -11,7 +11,7 @@
 | 文件 | 装在哪 | 说明 |
 | --- | --- | --- |
 | `dida.msi` | Windows | **推荐**。双击安装（约 62 MB，自带 .NET 运行时，什么环境都能跑），装完在系统托盘运行 |
-| `dida-0.3.9.zip` | Windows | **精简版（仅 2 MB）**。功能与 MSI 完全一样，但是打包时不带 .NET ——运行的话**要求电脑已装 .NET 10  + ASP.NET Core **（没装的话可以去 [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0) 下载安装，懒得折腾的可以直接下msi）。解压后双击 `dida.exe` 直接用，不写注册表，删掉目录即卸载 |
+| `dida-0.4.0.zip` | Windows | **精简版（仅 2 MB）**。功能与 MSI 完全一样，但是打包时不带 .NET ——运行的话**要求电脑已装 .NET 10  + ASP.NET Core **（没装的话可以去 [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0) 下载安装，懒得折腾的可以直接下msi）。解压后双击 `dida.exe` 直接用，不写注册表，删掉目录即卸载 |
 | `dida.apk` | Android | 直接安装 |
 | `dida-uninstall.cmd` | Windows | 卸载后清理残留注册信息，右键「以管理员身份运行」；加 `-CheckOnly` 参数只查看不动 |
 
