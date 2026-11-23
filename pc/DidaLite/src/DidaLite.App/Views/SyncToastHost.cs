@@ -105,6 +105,11 @@ internal sealed class SyncToastHost
         /// <summary>退出时向上滑的那一小段，和堆叠位移分开，互不打断。</summary>
         public required TranslateTransform Slide { get; init; }
 
+        /// <summary>入场时从下方升起的一小段，独立于堆叠与退出。</summary>
+        public required TranslateTransform Rise { get; init; }
+
+        /// <summary>数字滚动的计时器，复用时先停掉上一条。</summary>
+        public DispatcherTimer? CountTimer { get; set; }
         public DispatcherTimer? Timer { get; set; }
         public bool Leaving { get; set; }
     }
@@ -204,6 +209,7 @@ internal sealed class SyncToastHost
 
         var offset = new TranslateTransform();
         var slide = new TranslateTransform();
+        var rise = new TranslateTransform();
 
         var root = new Border
         {
@@ -212,7 +218,7 @@ internal sealed class SyncToastHost
             Child = layout,
             Cursor = Cursors.Hand,
             ToolTip = "单击关闭",
-            RenderTransform = new TransformGroup { Children = { offset, slide } },
+            RenderTransform = new TransformGroup { Children = { offset, slide, rise } },
         };
         root.SetResourceReference(Border.BackgroundProperty, "accent");
         if (Application.Current?.TryFindResource("OverlayShadow") is System.Windows.Media.Effects.Effect shadow)
@@ -231,6 +237,7 @@ internal sealed class SyncToastHost
             BarScale = barScale,
             Offset = offset,
             Slide = slide,
+            Rise = rise,
         };
 
         // 绿底白字：文字统一用 on-accent，切主题时跟着走
@@ -267,8 +274,9 @@ internal sealed class SyncToastHost
         {
             card.Message.Visibility = Visibility.Collapsed;
             card.Stats.Visibility = Visibility.Visible;
-            card.UploadValue.Text = $"{info.Uploaded} 条";
-            card.DownloadValue.Text = $"{info.Downloaded} 条";
+            // 数字从 0 滚到目标：与手机端一致，结果有「走上来」的过程而不是硬跳
+            RollTo(card, card.UploadValue, info.Uploaded);
+            RollTo(card, card.DownloadValue, info.Downloaded);
             card.Extra.Text = info.Extra ?? string.Empty;
             card.Extra.Visibility = string.IsNullOrEmpty(info.Extra) ? Visibility.Collapsed : Visibility.Visible;
         }
@@ -291,7 +299,56 @@ internal sealed class SyncToastHost
         card.Root.Opacity = 0;
         card.Root.BeginAnimation(
             UIElement.OpacityProperty,
-            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160)));
+            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            });
+
+        // 从下方 10px 轻轻升上来，和淡入同一拍；与堆叠/退出位移各用各的 transform
+        card.Rise.Y = 10;
+        card.Rise.BeginAnimation(
+            TranslateTransform.YProperty,
+            new DoubleAnimation(10, 0, TimeSpan.FromMilliseconds(280))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop,
+            });
+        card.Rise.Y = 0;
+    }
+
+    /// <summary>
+    /// 统计数字从 0 滚到目标值。用 16ms 的计时器配 easeOut 曲线，
+    /// 约 420ms 走完；目标为 0 时直接落位，免得空滚一次。
+    /// </summary>
+    private static void RollTo(Card card, TextBlock target, int to)
+    {
+        card.CountTimer?.Stop();
+        if (to <= 0)
+        {
+            target.Text = "0 条";
+            return;
+        }
+
+        const int durationMs = 420;
+        var started = Environment.TickCount64;
+        DispatcherTimer? self = null;
+        self = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        self.Tick += (_, _) =>
+        {
+            var elapsed = Environment.TickCount64 - started;
+            var t = Math.Min(1.0, elapsed / (double)durationMs);
+            // easeOutCubic：起步快、落点软
+            var eased = 1 - Math.Pow(1 - t, 3);
+            target.Text = $"{(int)Math.Round(to * eased)} 条";
+            if (t >= 1.0)
+            {
+                target.Text = $"{to} 条";
+                self.Stop();
+                if (ReferenceEquals(card.CountTimer, self)) card.CountTimer = null;
+            }
+        };
+        card.CountTimer = self;
+        self.Start();
     }
 
     /// <summary>开始 4 秒倒计时：进度条由满退到空，时间到就自己走。</summary>
@@ -322,6 +379,8 @@ internal sealed class SyncToastHost
 
         card.Timer?.Stop();
         card.Timer = null;
+        card.CountTimer?.Stop();
+        card.CountTimer = null;
         if (ReferenceEquals(_working, card)) _working = null;
 
         _cards.Remove(card);
