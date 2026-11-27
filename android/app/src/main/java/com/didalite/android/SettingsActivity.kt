@@ -28,6 +28,7 @@ class SettingsActivity : Activity() {
     private lateinit var urlInput: EditText
     private lateinit var nameInput: EditText
     private lateinit var pwdInput: EditText
+    private lateinit var pwdBox: LinearLayout
     private lateinit var loginBtn: TextView
     private lateinit var loginSlot: LinearLayout
     private lateinit var stateView: TextView
@@ -46,7 +47,7 @@ class SettingsActivity : Activity() {
         super.onCreate(savedInstanceState)
         db = Db(this)
         reauth = intent?.getBooleanExtra("reauth", false) == true
-        setContentView(buildUi())
+        setContentView(NavBar.wrap(this, buildUi(), NavBar.SETTINGS))
         applyDidaTheme()
 
         urlInput.setText(db.getMeta("server_url") ?: Api.DefaultServerUrl)
@@ -82,13 +83,7 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        titleRow.addView(TextView(this).apply {
-            text = "设置"
-            textSize = 22f
-            typeface = Ui.display
-            setTextColor(Ui.INK)
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        titleRow.addView(pill("返回", small = true).apply { setOnClickListener { finish() } })
+        titleRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         root.addView(titleRow)
 
         stateView = TextView(this).apply {
@@ -100,21 +95,23 @@ class SettingsActivity : Activity() {
         root.addView(stateView)
 
         root.addView(label("服务器地址"))
-        urlInput = input("已预填服务器，也可改成 192.168.1.5:5080", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        urlInput = input("服务器地址", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         root.addView(urlInput)
 
         root.addView(label("用户名"))
         nameInput = input("用户名", InputType.TYPE_CLASS_TEXT)
         root.addView(nameInput)
 
-        root.addView(label("密码"))
+        pwdBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        pwdBox.addView(label("密码"))
         pwdInput = input("密码", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
-        root.addView(pwdInput)
+        pwdBox.addView(pwdInput)
+        root.addView(pwdBox)
 
         loginSlot = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(loginSlot, fullWidth(topMargin = 16))
 
-        root.addView(pill("检查连接", small = true).apply {
+        root.addView(pill("检查连接").apply {
             setOnClickListener { runCheck() }
         }, fullWidth(topMargin = 10))
 
@@ -150,15 +147,6 @@ class SettingsActivity : Activity() {
         root.addView(pill("从系统日历读入任务").apply {
             setOnClickListener { readCalendar() }
         }, fullWidth(topMargin = 6))
-
-        root.addView(TextView(this).apply {
-            text = "地址与登录凭证只存在这台手机上，不会上传。任务数据在本机有一份完整副本，断网也能用。"
-            textSize = 12f
-            typeface = Ui.body
-            setTextColor(Ui.MUTED)
-            setLineSpacing(dp(3).toFloat(), 1f)
-            setPadding(0, dp(24), 0, 0)
-        })
 
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -218,16 +206,27 @@ class SettingsActivity : Activity() {
             typeface = Ui.body
             setTextColor(Ui.INK_2)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        // 状态文字固定宽度、左对齐：四行状态的起点对齐成一条竖线。
+        // 右侧按钮文案在「去开启」与「查看」之间切换、宽度不同，
+        // 若状态用 wrap_content 紧贴按钮，按钮一变宽就把状态往左顶——
+        // 「未开启」落在 840px、「已开启」落到 876px，两列参差。
         val state = TextView(this).apply {
             text = "检查中"
             textSize = 12f
             typeface = Ui.body
             setTextColor(Ui.MUTED)
+            gravity = Gravity.CENTER_VERTICAL
             setPadding(0, 0, dp(12), 0)
         }
-        row.addView(state)
+        row.addView(state, LinearLayout.LayoutParams(dp(STATE_WIDTH_DP),
+            ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        // 按钮定宽（以较宽的「去开启」为准）：这样「查看」不会让整行右边缘缩进，
+        // 状态那一列的位置也就不会被按钮文案的变化带着走。
         val button = pill(buttonText, small = true).apply { setOnClickListener { onOpen() } }
-        row.addView(button)
+        row.addView(button, LinearLayout.LayoutParams(dp(BUTTON_WIDTH_DP),
+            ViewGroup.LayoutParams.WRAP_CONTENT))
         permButtons[state] = button
         parent.addView(row)
         return state
@@ -246,6 +245,8 @@ class SettingsActivity : Activity() {
         nameInput.isEnabled = !logged
         pwdInput.isEnabled = !logged
         urlInput.isEnabled = !logged
+        // 已登入时密码框没有意义，直接收起来；登出或登录失效后会重新出现
+        pwdBox.visibility = if (logged) View.GONE else View.VISIBLE
         stateView.text = when {
             logged -> "已登入：" + known
             known.isNotEmpty() -> "未登入：账号 $known 已保留，输入密码就能重新登入"
@@ -277,17 +278,9 @@ class SettingsActivity : Activity() {
         setPerm(batteryState, Permissions.ignoringBatteryOptimizations(this))
         setPerm(fullScreenState, Permissions.canFullScreenIntent(this))
         val calendarAllowed = CalendarWriter.hasPermission(this)
-        val calendarName = db.getMeta("calendar_id")?.let { id ->
-            CalendarWriter.writableCalendars(this).firstOrNull { it.id.toString() == id }?.name
-        }?.let { name ->
-            // 小米日历把名字存成资源键（calendar_displayname_xiaomi），直出很难看
-            if (name.startsWith("calendar_displayname")) "系统日历" else name
-        }
-        calendarState.text = when {
-            !calendarAllowed -> "未开启"
-            calendarName != null -> "已开启 · $calendarName"
-            else -> "已开启"
-        }
+        // 状态列只回答「开没开」：固定宽度里放不下「已开启 · 日历名」，
+        // 具体写进哪个日历不是必要信息，塞在这里只会被截断。
+        calendarState.text = if (calendarAllowed) "已开启" else "未开启"
         calendarState.setTextColor(if (calendarAllowed) Ui.INK_2 else Ui.MUTED)
     }
 
@@ -504,5 +497,18 @@ class SettingsActivity : Activity() {
         const val REQ_NOTIFICATION = 1
         const val REQ_CALENDAR = 2
         const val REQ_CALENDAR_WRITE = 3
+
+        /**
+         * 权限行「状态」列宽（dp）。含右侧 12dp 内边距，文字约 36dp。
+         * 定宽的目的是让四行状态的起点对齐成一条竖线，不被右侧按钮文案带着走。
+         */
+        const val STATE_WIDTH_DP = 48
+
+        /**
+         * 权限行右侧按钮宽（dp）。取「去开启」三字的自然宽度（实测 60dp）。
+         * 「查看」两字本来只有 48dp，撑到 60dp 后各行右边缘一致，
+         * 状态列的位置也就固定了——这就是「以未开启为基准」的含义。
+         */
+        const val BUTTON_WIDTH_DP = 60
     }
 }

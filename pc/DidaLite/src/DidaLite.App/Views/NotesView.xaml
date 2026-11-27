@@ -107,10 +107,6 @@
                         </StackPanel.Style>
                         <TextBlock Text="还没有便签" HorizontalAlignment="Center"
                                    Style="{StaticResource HintText}" />
-                        <TextBlock Text="点「+ 新建」写第一条"
-                                   HorizontalAlignment="Center" Margin="0,4,0,0"
-                                   Style="{StaticResource HintText}"
-                                   Foreground="{DynamicResource text-secondary}" />
                     </StackPanel>
                 </Grid>
             </Grid>
@@ -137,8 +133,7 @@
                          BorderThickness="0"
                          Background="Transparent"
                          Padding="0,4"
-                         Text="{Binding NoteTitle, UpdateSourceTrigger=PropertyChanged}"
-                         ToolTip="标题，可以留空" />
+                         Text="{Binding NoteTitle, UpdateSourceTrigger=PropertyChanged}" />
 
                 <TextBox x:Name="NoteBodyBox"
                          Grid.Row="1"
@@ -184,11 +179,8 @@
                     </Style.Triggers>
                 </Style>
             </StackPanel.Style>
-            <TextBlock Text="选一条便签，或点「+ 新建」" HorizontalAlignment="Center"
+            <TextBlock Text="选一条便签" HorizontalAlignment="Center"
                        Style="{StaticResource HintText}" />
-            <TextBlock Text="便签会在手机与电脑之间同步" HorizontalAlignment="Center"
-                       Margin="0,6,0,0" Style="{StaticResource HintText}"
-                       Foreground="{DynamicResource text-secondary}" />
         </StackPanel>
     </Grid>
 </UserControl>

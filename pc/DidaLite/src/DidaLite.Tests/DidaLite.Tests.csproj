@@ -1,7 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- 要引用 DidaLite.App（net10.0-windows，含 WPF）里的课表备注服务，
+         所以测试项目跟着上 Windows 目标框架；测试本身不创建任何窗口。 -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -16,6 +19,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- 开了 UseWPF 之后隐式 using 不再默认带 System.IO，而所有测试都要用 Path / Directory -->
+    <Using Include="System.IO" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,6 +34,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DidaLite.Data\DidaLite.Data.csproj" />
+    <!-- 课表备注服务在 App 里（与 WPF 视图同一程序集），测试直接引用它 -->
+    <ProjectReference Include="..\DidaLite.App\DidaLite.App.csproj" />
   </ItemGroup>
 
 </Project>

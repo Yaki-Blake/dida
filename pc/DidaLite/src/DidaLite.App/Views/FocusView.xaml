@@ -3,6 +3,48 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- 专注页整组按钮统一带 1px 边框：次要操作和主操作一样有明确轮廓 -->
+        <Style x:Key="FocusOutlineButton" TargetType="Button" BasedOn="{StaticResource OutlineButton}">
+            <Setter Property="Height" Value="32" />
+        </Style>
+        <Style x:Key="FocusDangerButton" TargetType="Button" BasedOn="{StaticResource OutlineButton}">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Foreground" Value="{DynamicResource danger}" />
+        </Style>
+        <Style x:Key="FocusSegmentButton" TargetType="Button" BasedOn="{StaticResource SegmentButton}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid Background="Transparent">
+                            <Border x:Name="bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="{StaticResource RadiusM}"
+                                    RenderTransformOrigin="0.5,0.5">
+                                <Border.RenderTransform>
+                                    <ScaleTransform />
+                                </Border.RenderTransform>
+                            </Border>
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Center" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="BorderBrush" Value="{DynamicResource line}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource accent}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="FocusPrimaryButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="BorderBrush" Value="{DynamicResource accent}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
     </UserControl.Resources>
 
     <!-- 专注页：倒计时 / 秒表 / 闹钟 -->
@@ -17,13 +59,13 @@
                 BorderBrush="{DynamicResource line}" BorderThickness="1"
                 CornerRadius="{StaticResource RadiusM}" Padding="2">
             <StackPanel Orientation="Horizontal">
-                <Button Content="倒计时" Style="{StaticResource SegmentButton}"
+                <Button Content="倒计时" Style="{StaticResource FocusSegmentButton}"
                         Tag="{Binding Focus.IsCountdownTab}"
                         Command="{Binding Focus.ShowTabCommand}" CommandParameter="countdown" />
-                <Button Content="秒表" Style="{StaticResource SegmentButton}"
+                <Button Content="秒表" Style="{StaticResource FocusSegmentButton}"
                         Tag="{Binding Focus.IsStopwatchTab}"
                         Command="{Binding Focus.ShowTabCommand}" CommandParameter="stopwatch" />
-                <Button Content="闹钟" Style="{StaticResource SegmentButton}"
+                <Button Content="闹钟" Style="{StaticResource FocusSegmentButton}"
                         Tag="{Binding Focus.IsAlarmTab}"
                         Command="{Binding Focus.ShowTabCommand}" CommandParameter="alarm" />
             </StackPanel>
@@ -68,9 +110,9 @@
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
                         <Button Content="{Binding Focus.CountdownButtonText}"
-                                Style="{StaticResource PrimaryButton}" MinWidth="96"
+                                Style="{StaticResource FocusPrimaryButton}" MinWidth="96"
                                 Command="{Binding Focus.ToggleCountdownCommand}" />
-                        <Button Content="重置" Style="{StaticResource GhostButton}"
+                        <Button Content="重置" Style="{StaticResource FocusOutlineButton}"
                                 Margin="8,0,0,0"
                                 Command="{Binding Focus.ResetCountdownCommand}" />
                     </StackPanel>
@@ -78,14 +120,13 @@
 
                 <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center"
                             Margin="0,0,0,20">
-                    <TextBlock Text="快捷时长" Style="{StaticResource HintText}" VerticalAlignment="Center" />
-                    <Button Content="5 分钟" Style="{StaticResource GhostButton}" Margin="10,0,0,0"
+                    <Button Content="5 分钟" Style="{StaticResource FocusOutlineButton}" Margin="0"
                             Command="{Binding Focus.SetCountdownPresetCommand}" CommandParameter="5" />
-                    <Button Content="10 分钟" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                    <Button Content="10 分钟" Style="{StaticResource FocusOutlineButton}" Margin="4,0,0,0"
                             Command="{Binding Focus.SetCountdownPresetCommand}" CommandParameter="10" />
-                    <Button Content="25 分钟" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                    <Button Content="25 分钟" Style="{StaticResource FocusOutlineButton}" Margin="4,0,0,0"
                             Command="{Binding Focus.SetCountdownPresetCommand}" CommandParameter="25" />
-                    <Button Content="45 分钟" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                    <Button Content="45 分钟" Style="{StaticResource FocusOutlineButton}" Margin="4,0,0,0"
                             Command="{Binding Focus.SetCountdownPresetCommand}" CommandParameter="45" />
                 </StackPanel>
             </Grid>
@@ -115,11 +156,11 @@
                 <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center"
                             Margin="0,20,0,16">
                     <Button Content="{Binding Focus.StopwatchButtonText}"
-                            Style="{StaticResource PrimaryButton}" MinWidth="96"
+                            Style="{StaticResource FocusPrimaryButton}" MinWidth="96"
                             Command="{Binding Focus.ToggleStopwatchCommand}" />
-                    <Button Content="计次" Style="{StaticResource GhostButton}" Margin="8,0,0,0"
+                    <Button Content="计次" Style="{StaticResource FocusOutlineButton}" Margin="8,0,0,0"
                             Command="{Binding Focus.LapCommand}" />
-                    <Button Content="重置" Style="{StaticResource GhostButton}" Margin="8,0,0,0"
+                    <Button Content="重置" Style="{StaticResource FocusOutlineButton}" Margin="8,0,0,0"
                             Command="{Binding Focus.ResetStopwatchCommand}" />
                 </StackPanel>
 
@@ -165,23 +206,22 @@
                             BorderThickness="1" CornerRadius="{StaticResource RadiusM}"
                             Padding="2" Margin="14,0,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <Button Content="单次" Style="{StaticResource SegmentButton}"
+                            <Button Content="单次" Style="{StaticResource FocusSegmentButton}"
                                     Tag="{Binding Focus.IsOnceRepeat}"
                                     Command="{Binding Focus.SetRepeatCommand}" CommandParameter="once" />
-                            <Button Content="每天" Style="{StaticResource SegmentButton}"
+                            <Button Content="每天" Style="{StaticResource FocusSegmentButton}"
                                     Tag="{Binding Focus.IsDailyRepeat}"
                                     Command="{Binding Focus.SetRepeatCommand}" CommandParameter="daily" />
-                            <Button Content="工作日" Style="{StaticResource SegmentButton}"
+                            <Button Content="工作日" Style="{StaticResource FocusSegmentButton}"
                                     Tag="{Binding Focus.IsWeekdayRepeat}"
                                     Command="{Binding Focus.SetRepeatCommand}" CommandParameter="weekday" />
                         </StackPanel>
                     </Border>
 
                     <TextBox Style="{StaticResource InputTextBox}" Width="140" Margin="14,0,0,0"
-                             Text="{Binding Focus.NewAlarmLabel, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="标签（可留空）" />
+                             Text="{Binding Focus.NewAlarmLabel, UpdateSourceTrigger=PropertyChanged}" />
 
-                    <Button Content="添加闹钟" Style="{StaticResource PrimaryButton}" Margin="10,0,0,0"
+                    <Button Content="添加闹钟" Style="{StaticResource FocusPrimaryButton}" Margin="10,0,0,0"
                             Command="{Binding Focus.AddAlarmCommand}" />
                 </StackPanel>
 
@@ -218,7 +258,7 @@
                                                   IsChecked="{Binding Enabled, Mode=TwoWay}" />
 
                                     <Button Grid.Column="3" Content="删除"
-                                            Style="{StaticResource DangerGhostButton}"
+                                            Style="{StaticResource FocusDangerButton}"
                                             VerticalAlignment="Center"
                                             Command="{Binding DataContext.Focus.DeleteAlarmCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}" />
@@ -234,11 +274,11 @@
                     <TextBlock Text="{Binding Focus.RingName}" Style="{StaticResource MetaText}"
                                Margin="10,0,0,0" MaxWidth="240"
                                TextTrimming="CharacterEllipsis" />
-                    <Button Content="选择文件" Style="{StaticResource GhostButton}" Margin="12,0,0,0"
+                    <Button Content="选择文件" Style="{StaticResource FocusOutlineButton}" Margin="12,0,0,0"
                             Command="{Binding Focus.PickRingCommand}" />
-                    <Button Content="试听" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                    <Button Content="试听" Style="{StaticResource FocusOutlineButton}" Margin="4,0,0,0"
                             Command="{Binding Focus.TestRingCommand}" />
-                    <Button Content="恢复默认" Style="{StaticResource GhostButton}" Margin="4,0,0,0"
+                    <Button Content="恢复默认" Style="{StaticResource FocusOutlineButton}" Margin="4,0,0,0"
                             Command="{Binding Focus.ResetRingCommand}" />
                 </StackPanel>
             </Grid>

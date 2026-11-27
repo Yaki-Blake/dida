@@ -50,6 +50,12 @@ public partial class MainWindow : Window
     /// <summary>等待 Enter 确认删除的便签。两者互斥，同一时刻只会有一个非空。</summary>
     private NoteViewModel? _pendingNoteDelete;
 
+    /// <summary>详情上一次显示的任务 Id；用来区分「换了一条」和「同一条保存后重载」。</summary>
+    private string? _lastSelectedTaskId;
+
+    /// <summary>详情正在首次展开：此时只播整栏滑入，不再叠内容切换动画。</summary>
+    private bool _detailOpening;
+
     /// <summary>右上角的同步浮层：贴在「同步 / 添加」下方，4 秒后自己收起。</summary>
     private readonly SyncToastHost _syncToast;
 
@@ -71,14 +77,30 @@ public partial class MainWindow : Window
     /// <summary>侧栏与主区之间那条拖动条的命中区宽度（视觉线仍是 2px）。</summary>
     private const double SidebarSplitterWidth = 10;
 
+    /// <summary>
+    /// 右侧详情的最小宽度：日期框放得下 2026-11-12、时间框 88px，
+    /// 再加两侧留白与中间空隙——也就是截图里圈出来的部分全部压掉后的尺寸。
+    /// </summary>
+    private const double RightPanelMinWidth = 240;
+
     /// <summary>已经排了一次宽度重算，避免同一轮布局里反复排队。</summary>
     private bool _columnLimitPending;
+
+    /// <summary>详情展开时，主区一次「空白点击」的按下位置；拖动滚动不算点击。</summary>
+    private Point _blankClickStart;
+    private bool _blankClickArmed;
 
     /// <summary>
     /// 侧栏「想要」的宽度：默认值来自 Tokens，用户拖动时更新。
     /// 显示宽度只在窗口放不下时临时压缩，空间回来就恢复到这个值。
     /// </summary>
     private double _sidebarDesiredWidth;
+
+    /// <summary>右侧详情「想要」的宽度；窗口放不下时临时收窄，空间回来再恢复。</summary>
+    private double _rightPanelDesiredWidth;
+
+    /// <summary>右侧详情拖动开始时的宽度；Thumb 的 DragDelta 给的是相对这个值的变化量。</summary>
+    private double _rightPanelStartWidth;
 
     public MainWindow()
     {
@@ -87,6 +109,7 @@ public partial class MainWindow : Window
         // 侧栏默认宽度来自 Tokens（SidebarColumnWidth）；记下这个「想要的值」，
         // 之后只在窗口放不下时临时压缩，不会再把它永久改小
         _sidebarDesiredWidth = SidebarColumn.Width.Value;
+        _rightPanelDesiredWidth = DetailPanel.Width;
 
         // .env 先读进来：同步客户端和同步服务都要用
         EnvFile.Load();
@@ -124,9 +147,16 @@ public partial class MainWindow : Window
         StateChanged += OnStateChanged;
         PreviewKeyDown += OnPreviewKeyDown;
 
-        // 窗口变窄或右侧详情打开后，已拖宽的侧栏要收回，不能把主区挤没
-        SizeChanged += (_, _) => ClampSidebarWidth();
-        DetailPanel.IsVisibleChanged += (_, _) => UpdateMainColumnMinWidth();
+        // 窗口变窄或右侧详情打开后，主列下限和侧栏都要跟着重算：
+        // 只夹侧栏的话，主列 MinWidth 会停在宽窗口时的旧值，整块布局被撑出窗口
+        SizeChanged += (_, _) => ScheduleColumnLimitUpdate();
+        DetailPanel.IsVisibleChanged += (_, _) => OnRightPanelVisibilityChanged();
+        CoursePanel.IsVisibleChanged += (_, _) => OnRightPanelVisibilityChanged();
+        SyncDetailSplitterVisibility();
+
+        // 详情展开时点主区空白处收起；点在日程块或拖拽滚动都不算
+        ContentHost.PreviewMouseLeftButtonDown += OnContentBlankDown;
+        ContentHost.PreviewMouseLeftButtonUp += OnContentBlankUp;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e) => StartServices();
@@ -238,19 +268,29 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 宽度分配的基准取外层覆盖层的客户区宽度，绝不能读 RootGrid.ActualWidth：
+    /// 后者会被自身各列的 MinWidth 撑大，窗口缩小后仍是旧值，主列下限就再也降不回来。
+    /// </summary>
+    private double LayoutWidth
+        => OverlayRoot?.ActualWidth ?? RootGrid?.ActualWidth ?? ActualWidth;
+
+    /// <summary>
     /// 主区最小宽度：侧栏优先。先让侧栏拿到想要的宽度，剩下的给主区；
-    /// 主区放不下完整头部时，头部靠副标题省略号让位，最多压到 <see cref="HeaderWidthPolicy.HeaderTrimFloor"/>。
-    /// 头部宽度会随标题、副标题、按钮显隐变化，所以每次头部尺寸变化都重算。
+    /// 主区放不下完整头部时最多压到 <see cref="HeaderWidthPolicy.HeaderTrimFloor"/>。
+    /// 头部宽度会随标题和按钮显隐变化，所以每次头部尺寸变化都重算。
     /// </summary>
     private void UpdateMainColumnMinWidth()
     {
         if (MainColumn is null || HeaderBar is null || HeaderLeft is null || HeaderRight is null) return;
 
-        var rootWidth = RootGrid?.ActualWidth ?? ActualWidth;
+        var rootWidth = LayoutWidth;
 
         // 首帧还没量出真实宽度（0 或极小）时就别算：这时可用宽度是负数，
         // 一算就会把主区下限顶到上限、侧栏被永久按到 180，窗口再宽也回不来
         if (!HeaderWidthPolicy.IsMeasured(rootWidth, MinWidth)) return;
+
+        // 先按当前窗口能给出的空间夹一次右侧面板，再拿它的实际宽度算主区下限
+        ClampRightPanelWidth();
 
         var margin = HeaderBar.Margin;
         var headerNeed = Math.Ceiling(
@@ -265,9 +305,66 @@ public partial class MainWindow : Window
         ClampSidebarWidth();
     }
 
-    /// <summary>右侧详情面板占的宽度（没显示时为 0）。</summary>
+    /// <summary>右侧详情面板占的宽度（任务详情 / 课程详情共用那一列，都没显示时为 0）。</summary>
     private double DetailWidth
-        => DetailPanel is { Visibility: Visibility.Visible } ? DetailPanel.Width : 0;
+    {
+        get
+        {
+            if (DetailPanel is { Visibility: Visibility.Visible }) return DetailPanel.Width;
+            if (CoursePanel is { Visibility: Visibility.Visible }) return CoursePanel.Width;
+            return 0;
+        }
+    }
+
+    // ---------------- 右侧详情宽度 ----------------
+
+    private void OnRightPanelVisibilityChanged()
+    {
+        SyncDetailSplitterVisibility();
+        UpdateMainColumnMinWidth();
+    }
+
+    private void SyncDetailSplitterVisibility()
+        => DetailSplitter.Visibility =
+            DetailPanel.Visibility == Visibility.Visible || CoursePanel.Visibility == Visibility.Visible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+    /// <summary>
+    /// 面板最大宽度：侧栏 + 拖动条 + 主区压到头部下限后，剩下的都能给详情。
+    /// </summary>
+    private double GetRightPanelMaxWidth()
+        => Math.Max(RightPanelMinWidth,
+            LayoutWidth - SidebarSplitterWidth - HeaderWidthPolicy.HeaderTrimFloor - _sidebarDesiredWidth);
+
+    /// <summary>窗口变窄时只收窄显示宽度，用户拖出来的期望值留着，空间回来再恢复。</summary>
+    private void ClampRightPanelWidth()
+    {
+        if (DetailPanel is null || CoursePanel is null) return;
+
+        var width = HeaderWidthPolicy.Clamp(_rightPanelDesiredWidth, RightPanelMinWidth, GetRightPanelMaxWidth());
+        if (Math.Abs(width - DetailPanel.Width) < 0.5) return;
+
+        DetailPanel.Width = width;
+        CoursePanel.Width = width;
+    }
+
+    private void DetailSplitter_DragStarted(object sender, DragStartedEventArgs e)
+        => _rightPanelStartWidth = DetailPanel.Visibility == Visibility.Visible
+            ? DetailPanel.ActualWidth
+            : CoursePanel.ActualWidth;
+
+    private void DetailSplitter_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        // 拖动条贴在面板左边缘：往左拖（变化量为负）面板变宽
+        var width = HeaderWidthPolicy.Clamp(
+            _rightPanelStartWidth - e.HorizontalChange, RightPanelMinWidth, GetRightPanelMaxWidth());
+
+        _rightPanelDesiredWidth = width;
+        DetailPanel.Width = width;
+        CoursePanel.Width = width;
+        ScheduleColumnLimitUpdate();
+    }
 
     private void SidebarSplitter_DragStarted(object sender, DragStartedEventArgs e)
         => _sidebarDesiredWidth = SidebarColumn.ActualWidth;
@@ -295,7 +392,7 @@ public partial class MainWindow : Window
     {
         if (RootGrid is null) return SidebarColumn.MinWidth;
 
-        var available = RootGrid.ActualWidth - SidebarSplitterWidth - DetailWidth;
+        var available = LayoutWidth - SidebarSplitterWidth - DetailWidth;
         return HeaderWidthPolicy.SidebarMaxWidth(available, SidebarColumn.MinWidth);
     }
 
@@ -306,7 +403,7 @@ public partial class MainWindow : Window
     {
         if (SidebarColumn is null) return;
 
-        var rootWidth = RootGrid?.ActualWidth ?? ActualWidth;
+        var rootWidth = LayoutWidth;
         if (!HeaderWidthPolicy.IsMeasured(rootWidth, MinWidth)) return;
 
         var width = HeaderWidthPolicy.Clamp(_sidebarDesiredWidth, SidebarColumn.MinWidth, GetSidebarMaxWidth());
@@ -432,14 +529,14 @@ public partial class MainWindow : Window
     private void SettingsButton_Click(object sender, RoutedEventArgs e) => ShowSettings();
 
     /// <summary>
-    /// 点日视图课程带上的课：跳到课表页，把那一周那一天和这门课的详情一起带过去。
+    /// 点主界面课程带上的课：右侧展开这门课自己的详情（时间、节次、地点、老师、周次与备注），
+    /// 和点日程一样就地看，不再跳到课表页。
     /// </summary>
     private void DayCourse_Click(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: DayCourseBlockViewModel block }) return;
 
-        _vm.Schedule.FocusCourse(block.Course);
-        _vm.Mode = ViewMode.Schedule;
+        _vm.OpenCourseDetail(block.Course);
         e.Handled = true;
     }
 
@@ -503,7 +600,7 @@ public partial class MainWindow : Window
     private void OnCountdownFinished(object? sender, EventArgs e)
     {
         SoundService.Play();
-        new AlarmRingWindow("倒计时", "00:00", "倒计时结束", false).Show();
+        new AlarmRingWindow("00:00", "倒计时结束", false).Show();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -513,14 +610,34 @@ public partial class MainWindow : Window
             case nameof(MainViewModel.IsDetailVisible):
                 if (_vm.IsDetailVisible)
                 {
+                    // 同一次选中会先触发展开、再触发 SelectedTask；这期间别再播内容切换
+                    _detailOpening = true;
                     AnimateDetailIn();
                     FocusTitle();
+                    Dispatcher.BeginInvoke(() => _detailOpening = false,
+                        System.Windows.Threading.DispatcherPriority.Loaded);
                 }
                 else
                 {
+                    _detailOpening = false;
                     ResetDetail();
                 }
 
+                break;
+
+            case nameof(MainViewModel.SelectedTask):
+                OnDetailTaskChanged();
+                break;
+
+            case nameof(MainViewModel.IsCourseDetailVisible):
+                if (_vm.IsCourseDetailVisible) AnimateCourseIn();
+                else ResetCourse();
+                break;
+
+            // 不走分段动画的切视图（年视图点日期、月视图点格子、侧栏日历等）：
+            // 动画残留的绿块缩放要复位，否则选中按钮只剩白字，看着像字没了
+            case nameof(MainViewModel.Mode) when !_segmentAnimating:
+                ResetSegmentVisuals();
                 break;
 
             // 月 / 年 / 专注首次切过去才建，启动时不用为三个不可见的界面买单
@@ -584,12 +701,72 @@ public partial class MainWindow : Window
             new DoubleAnimation(24, 0, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
     }
 
+    /// <summary>
+    /// 面板已经展开时又选中另一条日程：让详情内容淡入并轻轻上浮，
+    /// 切换才有「换了一条」的反馈；同一条保存后重载不播，避免无谓闪动。
+    /// </summary>
+    private void OnDetailTaskChanged()
+    {
+        var id = _vm.SelectedTask?.Model.Id;
+        var switched = !string.Equals(id, _lastSelectedTaskId, StringComparison.Ordinal);
+        _lastSelectedTaskId = id;
+
+        // 首次展开交给 AnimateDetailIn；面板没开或同一条刷新都不播
+        if (!switched || _detailOpening || !_vm.IsDetailVisible) return;
+
+        DetailScroll.ScrollToTop();
+        AnimateDetailSwap();
+    }
+
+    private void AnimateDetailSwap()
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        // 不从全透明起步：按住方向键连续切换时，内容不会一直发灰
+        DetailBody.BeginAnimation(OpacityProperty, null);
+        DetailBody.Opacity = 0.4;
+        DetailBodySlide.BeginAnimation(TranslateTransform.YProperty, null);
+        DetailBodySlide.Y = 8;
+
+        DetailBody.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0.4, 1, TimeSpan.FromMilliseconds(170)) { EasingFunction = ease });
+        DetailBodySlide.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(8, 0, TimeSpan.FromMilliseconds(210)) { EasingFunction = ease });
+    }
+
     private void ResetDetail()
     {
         DetailPanel.BeginAnimation(OpacityProperty, null);
         DetailSlide.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
         DetailPanel.Opacity = 0;
         DetailSlide.X = 24;
+
+        DetailBody.BeginAnimation(OpacityProperty, null);
+        DetailBodySlide.BeginAnimation(TranslateTransform.YProperty, null);
+        DetailBody.Opacity = 1;
+        DetailBodySlide.Y = 0;
+    }
+
+    /// <summary>课程详情从右侧滑入：和任务详情同一套节奏，换个内容不换手感。</summary>
+    private void AnimateCourseIn()
+    {
+        CoursePanel.Opacity = 0;
+        CourseSlide.X = 24;
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        CoursePanel.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+        CourseSlide.BeginAnimation(TranslateTransform.XProperty,
+            new DoubleAnimation(24, 0, TimeSpan.FromMilliseconds(200)) { EasingFunction = ease });
+    }
+
+    private void ResetCourse()
+    {
+        CoursePanel.BeginAnimation(OpacityProperty, null);
+        CourseSlide.BeginAnimation(TranslateTransform.XProperty, null);
+        CoursePanel.Opacity = 0;
+        CourseSlide.X = 24;
     }
 
     /// <summary>
@@ -795,6 +972,52 @@ public partial class MainWindow : Window
     /// 鼠标在主面板时：上下选日程、Enter 完成、Delete 删除（需 Enter 确认）。
     /// 输入框里打字时一律不抢键。
     /// </summary>
+    /// <summary>详情展开时在主区按下：记下位置，抬起时才决定要不要收起。</summary>
+    private void OnContentBlankDown(object sender, MouseButtonEventArgs e)
+    {
+        _blankClickArmed = false;
+        if (!HasOpenSidePanel || e.OriginalSource is not DependencyObject source) return;
+        if (IsInteractiveClickTarget(source)) return;
+
+        _blankClickStart = e.GetPosition(this);
+        _blankClickArmed = true;
+    }
+
+    /// <summary>只有「按下和抬起都在空白处、位移很小」才收起详情，拖动滚动不误伤。</summary>
+    private void OnContentBlankUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_blankClickArmed) return;
+        _blankClickArmed = false;
+
+        if (!HasOpenSidePanel || e.OriginalSource is not DependencyObject source) return;
+        if (IsInteractiveClickTarget(source)) return;
+        if ((e.GetPosition(this) - _blankClickStart).Length > 4) return;
+
+        // 右侧那一格只可能开着一个面板，收起当前这个
+        if (_vm.IsCourseDetailVisible) _vm.CloseCourseDetailCommand.Execute(null);
+        else _vm.CloseDetailCommand.Execute(null);
+    }
+
+    /// <summary>右侧是否开着面板（任务详情或课程详情）。</summary>
+    private bool HasOpenSidePanel => _vm.IsDetailVisible || _vm.IsCourseDetailVisible;
+
+    /// <summary>日程按钮、课表卡片、输入框、滚动条等可交互元素不算「空白」。</summary>
+    private static bool IsInteractiveClickTarget(DependencyObject source)
+    {
+        for (DependencyObject? node = source; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is ButtonBase or TextBoxBase or ComboBox or PasswordBox
+                or ScrollBar or Slider or ListBoxItem or TreeViewItem or TabItem)
+                return true;
+
+            // 课表卡片和日视图课程块是 Border + 鼠标事件，统一用 Cursor=Hand 识别
+            if (node is FrameworkElement fe && fe.Cursor == Cursors.Hand)
+                return true;
+        }
+
+        return false;
+    }
+
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.FocusedElement is TextBoxBase or ComboBox or PasswordBox) return;
@@ -817,7 +1040,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (DetailPanel.IsMouseOver) return;
+        if (DetailPanel.IsMouseOver || CoursePanel.IsMouseOver) return;
 
         if (ContentHost.IsMouseOver)
         {
@@ -994,6 +1217,14 @@ public partial class MainWindow : Window
         ConfirmBar.Visibility = Visibility.Collapsed;
     }
 
+    private void ConfirmDeleteButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_pendingNoteDelete is not null) ConfirmNoteDelete();
+        else _ = ConfirmDeleteAsync();
+    }
+
+    private void CancelDeleteButton_Click(object sender, RoutedEventArgs e) => CancelDelete();
+
     /// <summary>便签页的 Delete：同样先弹确认条，Enter 才真删，免得手滑把正文弄没了。</summary>
     private void RequestDeleteNote()
     {
@@ -1093,7 +1324,7 @@ public partial class MainWindow : Window
         finally
         {
             SegmentDot.Visibility = Visibility.Collapsed;
-            ShowSegmentText(old);
+            ResetSegmentVisuals();
 
             // 无论成功与否都把内容层恢复到正常位置，避免停成透明或偏移
             ContentSlide.BeginAnimation(TranslateTransform.XProperty, null);
@@ -1291,16 +1522,44 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>恢复按钮文字（绿块已消失时显示成普通灰字）。</summary>
-    private static void ShowSegmentText(Button? button)
+    /// <summary>
+    /// 把分段按钮的动画残留全部清干净：绿块缩放回 1、圆角回默认、文字不透明。
+    /// 动画只把「旧按钮」的绿块缩到 0 藏起来，若之后通过别的方式切到那个视图
+    /// （年视图点日期、月视图点格子、侧栏日历等不走分段动画），选中态会变成
+    /// 「白字 + 隐形的绿块」，看着就像那个字不见了，所以每次落定都要复位一次。
+    /// </summary>
+    private void ResetSegmentVisuals()
     {
-        if (button is null) return;
+        foreach (var button in AllSegmentButtons())
+        {
+            var (border, block, text) = SegmentParts(button);
 
-        var (_, _, text) = SegmentParts(button);
-        if (text is null) return;
+            if (border is not null && block is not null)
+            {
+                block.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                block.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                block.ScaleX = 1;
+                block.ScaleY = 1;
+                border.ClearValue(Border.CornerRadiusProperty);
+            }
 
-        text.BeginAnimation(OpacityProperty, null);
-        text.Opacity = 1;
+            if (text is null) continue;
+
+            text.BeginAnimation(OpacityProperty, null);
+            text.Opacity = 1;
+        }
+    }
+
+    /// <summary>分段条里的全部按钮，顺序与显示顺序一致。</summary>
+    private IEnumerable<Button> AllSegmentButtons()
+    {
+        yield return ScheduleSegmentButton;
+        yield return DaySegmentButton;
+        yield return WeekSegmentButton;
+        yield return MonthSegmentButton;
+        yield return YearSegmentButton;
+        yield return FocusSegmentButton;
+        yield return NotesSegmentButton;
     }
 
     /// <summary>旧按钮文字淡回来，避免文字在一帧内突然冒出来。</summary>

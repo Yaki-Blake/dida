@@ -21,24 +21,56 @@ public partial class ScheduleView : UserControl
     /// <summary>
     /// 详情栏能拖到的最窄 / 最宽（逻辑像素）。
     /// 下限 240 = 20×2 内边距 + 68 标签列 + 最长的一行值（「2026年11月11日 周三」约 129），
-    /// 刚好放得下且不折行；默认 252 再收一档，展开时课表 7 天不被挤得太窄，
-    /// 同时仍留 12px 向左的拖动余量，不会一打开就卡在极限上。
+    /// 刚好放得下且不折行；默认 300 与主界面右侧详情（DetailWidth）一致，内容舒展。
     /// </summary>
     private const double DetailMinWidth = 240;
     private const double DetailMaxWidth = 880;
 
-    /// <summary>用户拖出来的宽度，收起再展开仍沿用；窗口不够宽时只压缩显示，不丢设定值。</summary>
-    private double _detailWidth = 252;
+    /// <summary>默认宽度：与主界面右侧详情一致；用户拖过之后这里记为上次的宽度。</summary>
+    private const double DetailDefaultWidth = 300;
+    private double _detailWidth = DetailDefaultWidth;
 
     /// <summary>本次拖动中的目标宽度，按增量累加后夹在允许范围内。</summary>
     private double _detailDragWidth;
+
+    /// <summary>
+    /// 周六、周日两列合计占的宽度（= 右侧详情栏的宽度），由 XAML 绑到两个
+    /// <see cref="WeekColumnsPanel"/> 的 WeekendWidth 上。
+    /// 做成依赖属性是为了让面板重建（切周、导入课表）后绑定依然成立。
+    /// </summary>
+    public static readonly DependencyProperty WeekendColumnWidthProperty =
+        DependencyProperty.Register(
+            nameof(WeekendColumnWidth), typeof(double), typeof(ScheduleView),
+            new FrameworkPropertyMetadata(0d,
+                FrameworkPropertyMetadataOptions.AffectsMeasure));
+
+    public double WeekendColumnWidth
+    {
+        get => (double)GetValue(WeekendColumnWidthProperty);
+        set => SetValue(WeekendColumnWidthProperty, value);
+    }
 
     public ScheduleView()
     {
         InitializeComponent();
 
-        // 窗口变窄或右侧主界面详情打开时，收回过宽的详情栏，别把 7 天网格挤没
+        // 窗口尺寸变化时重算能给出的最大宽度；ClampDetailWidth 内部会把新的周末列宽下发
         RootLayout.SizeChanged += (_, _) => ClampDetailWidth();
+    }
+
+    /// <summary>详情展开瞬间按上次的宽度恢复（没拖过就是默认 300）。</summary>
+    private void CourseDetailCard_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (CourseDetailCard.Visibility == Visibility.Visible) ClampDetailWidth();
+
+        // 收起时也要重算：边栏让出来的周末两列要还给 7 天网格
+        SyncWeekColumns();
+    }
+
+    /// <summary>边栏宽度每一次变化（拖动、夹紧、恢复记忆值）都同步给网格。</summary>
+    private void CourseDetailCard_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.WidthChanged) SyncWeekColumns();
     }
 
     private void DetailSplitter_DragStarted(object sender, DragStartedEventArgs e)
@@ -55,21 +87,62 @@ public partial class ScheduleView : UserControl
         CourseDetailCard.Width = _detailWidth;
     }
 
-    /// <summary>详情栏右极限：课表主体至少留下 TimetableColumn.MinWidth，再加一条硬上限。</summary>
+    /// <summary>
+    /// 详情栏右极限：它占掉的是周末两列，所以上限跟着「网格可用宽 − 工作日保底」走；
+    /// 再加一条硬上限，避免超宽屏上把侧边栏拉到荒唐的宽度。
+    /// </summary>
     private double GetDetailMaxWidth()
     {
-        var available = RootLayout.ActualWidth - DetailSplitterWidth - TimetableColumn.MinWidth;
+        var gridWidth = GetWeekGridWidth();
+        var weekendLimit = WeekColumnsPanel.MaxWeekendWidth(gridWidth);
+
+        // 网格还没量出宽度时不能按 0 算，否则边栏会被压成下限、一展开就觉得「卡住了」
+        var available = gridWidth > 0
+            ? weekendLimit
+            : RootLayout.ActualWidth - DetailSplitterWidth - TimetableColumn.MinWidth;
+
         return Math.Max(DetailMinWidth, Math.Min(DetailMaxWidth, available));
     }
 
-    /// <summary>窗口变窄时只压缩当前显示宽度；重新变宽会按用户拖过的值恢复。</summary>
+    /// <summary>7 天网格（不含左侧节次列）当前可用的宽度。</summary>
+    private double GetWeekGridWidth()
+    {
+        // 表头与格子共用同一套列宽，取其中任意一个的实际宽度即可
+        if (CellGrid.ActualWidth > 0) return CellGrid.ActualWidth;
+        if (HeaderRow.ActualWidth > 0) return HeaderRow.ActualWidth;
+
+        var width = WeekGrid.ActualWidth - PeriodColumn.ActualWidth;
+        return Math.Max(0, width);
+    }
+
+    /// <summary>按上次的宽度恢复（默认 300）；只在窗口放不下时夹紧，不改记忆值。</summary>
     private void ClampDetailWidth()
     {
-        if (CourseDetailCard.Visibility != Visibility.Visible) return;
+        if (CourseDetailCard.Visibility != Visibility.Visible)
+        {
+            SyncWeekColumns();
+            return;
+        }
 
         var width = Math.Clamp(_detailWidth, DetailMinWidth, GetDetailMaxWidth());
-        if (Math.Abs(CourseDetailCard.Width - width) < 0.5) return;
-        CourseDetailCard.Width = width;
+        if (Math.Abs(CourseDetailCard.Width - width) >= 0.5) CourseDetailCard.Width = width;
+
+        SyncWeekColumns();
+    }
+
+    /// <summary>
+    /// 把详情栏的占位下发给表头与课表主体：周末两列合起来正好等于边栏宽度，
+    /// 于是被边栏整块占掉，周一到周五均分剩下的宽度。
+    /// 收起时置 0，面板退回 7 列等分。
+    /// </summary>
+    private void SyncWeekColumns()
+    {
+        var weekendWidth = CourseDetailCard.Visibility == Visibility.Visible
+            ? Math.Max(0, CourseDetailCard.ActualWidth)
+            : 0;
+
+        if (Math.Abs(WeekendColumnWidth - weekendWidth) < 0.01) return;
+        WeekendColumnWidth = weekendWidth;
     }
 
     /// <summary>选本地 .ics / .json 导入；落盘并刷新由 ScheduleImporter 负责。</summary>
@@ -182,7 +255,7 @@ public partial class ScheduleView : UserControl
     private static void ResetSyncButton(Button button)
     {
         button.Content = "一键同步";
-        button.ToolTip = "打开本机的「同步助手」页：从助手里进教务课表页，点一下书签即可同步（点击可取消）";
+        button.ToolTip = "从教务系统同步课表";
     }
 
     private static string ShortState(string message)
@@ -215,13 +288,6 @@ public partial class ScheduleView : UserControl
     {
         if (sender is FrameworkElement { DataContext: ScheduleEvent course })
             (DataContext as ScheduleViewModel)?.OpenCourseCommand.Execute(course);
-    }
-
-    /// <summary>点日视图一行 → 打开详情；行的数据项是 ScheduleDayItem。</summary>
-    private void DayRow_Click(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: ScheduleDayItem item })
-            (DataContext as ScheduleViewModel)?.OpenCourseCommand.Execute(item.Course);
     }
 
     /// <summary>Esc 收起详情面板；关闭时未点保存的备注也会自动落盘。</summary>

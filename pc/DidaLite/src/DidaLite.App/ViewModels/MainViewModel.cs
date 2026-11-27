@@ -33,10 +33,6 @@ public sealed partial class TaskGroup : ObservableObject
     public string Header { get; init; } = string.Empty;
     public string HeaderBrushKey { get; init; } = "text-secondary";
     public IReadOnlyList<TaskViewModel> Items { get; init; } = Array.Empty<TaskViewModel>();
-    public bool IsEmpty => Items.Count == 0;
-
-    /// <summary>空分组时显示的占位文案，空字符串表示不显示。</summary>
-    public string EmptyHint { get; init; } = string.Empty;
 
     /// <summary>
     /// 是否允许折叠。日视图的「逾期」分组会攒到几十条，全铺在时间轴上方会把时间轴顶出首屏，
@@ -232,10 +228,17 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private string _monthTitle = string.Empty;
     [ObservableProperty] private string _mainTitle = string.Empty;
-    [ObservableProperty] private string _mainSubtitle = string.Empty;
 
     [ObservableProperty] private ViewMode _mode = ViewMode.Today;
     [ObservableProperty] private DateTime _selectedDate = DateTime.Today;
+
+    /// <summary>换到别的视图时，右侧详情属于上一屏的内容，直接收起。</summary>
+    partial void OnModeChanged(ViewMode value)
+    {
+        if (IsDetailVisible) CloseDetail();
+        if (IsCourseDetailVisible) CloseCourseDetail();
+    }
+
     [ObservableProperty] private DateTime _displayMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
 
     [ObservableProperty] private int _todayCount;
@@ -261,8 +264,10 @@ public sealed partial class MainViewModel : ObservableObject
 
     // ---------------- 日视图时间轴 ----------------
 
-    /// <summary>时间轴一小时的像素高度。日程块、课程带、全天事件竖带都按这个刻度换算，改一处即可。</summary>
-    public double TimelineHourHeight => 48;
+    /// <summary>时间轴一小时的像素高度。日程块、课程带、全天事件竖带都按这个刻度换算，改一处即可。
+    /// 80 = 一节课（90 分钟）约 120px，课名 / 时间 / 教室 / 教师四行宽松放下，不再互相盖住；
+    /// 总高超出窗口时外层 TimelineScroll 自动给出滚动条，可手动上下滑动。</summary>
+    public double TimelineHourHeight => 80;
 
     /// <summary>时间轴默认从 6 点画到 23 点，有更早 / 更晚的日程再向外扩。</summary>
     [ObservableProperty] private int _timelineStartHour = 6;
@@ -338,6 +343,9 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private TaskViewModel? _selectedTask;
     [ObservableProperty] private bool _isDetailVisible;
     [ObservableProperty] private bool _isNewTask;
+
+    /// <summary>右侧正在展示课程详情（日视图点课程带）。和任务详情互斥，同一个位置只开一个。</summary>
+    [ObservableProperty] private bool _isCourseDetailVisible;
 
     [ObservableProperty] private string _editTitle = string.Empty;
     [ObservableProperty] private string _editNote = string.Empty;
@@ -584,6 +592,32 @@ public sealed partial class MainViewModel : ObservableObject
         SelectedTask = null;
     }
 
+    /// <summary>
+    /// 日视图左侧课程带上点一节课：收起任务详情，右侧换成这门课自己的细节与备注。
+    /// 字段和备注读写都在课表页那份状态里，这里只是把它请到右侧来。
+    /// </summary>
+    public void OpenCourseDetail(ScheduleEvent course)
+    {
+        if (IsDetailVisible) CloseDetail();
+
+        Schedule.OpenCourseCommand.Execute(course);
+        IsCourseDetailVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseCourseDetail()
+    {
+        // 课表页的课程卡片和这里共用一份状态，一起收起；未保存的备注由它自己落盘
+        Schedule.CloseDetailCommand.Execute(null);
+        IsCourseDetailVisible = false;
+    }
+
+    /// <summary>选了任务就收课程详情：右侧那一格同时只放得下一个面板。</summary>
+    partial void OnIsDetailVisibleChanged(bool value)
+    {
+        if (value && IsCourseDetailVisible) CloseCourseDetail();
+    }
+
     [RelayCommand]
     private void NewTask()
     {
@@ -735,21 +769,24 @@ public sealed partial class MainViewModel : ObservableObject
         _undoTimer.Start();
     }
 
-    /// <summary>一键完成按钮：今天 / 全部视图有逾期就先清逾期，否则清选中日。</summary>
+    /// <summary>
+    /// 一键完成按钮：今天 / 全部视图有逾期就先清逾期，否则清选中日。
+    /// 月视图整屏看的是一个月，不针对某一天批量完成，这个位置留给「展开全部」。
+    /// </summary>
     public bool CanBulkDone => BulkDonePlan().Items.Count > 0;
 
-    public string BulkDoneText
-    {
-        get
-        {
-            var plan = BulkDonePlan();
-            return $"{plan.Text}（{plan.Items.Count}）";
-        }
-    }
+    /// <summary>按钮上半行：完成本日 / 完成逾期 / 完成某日。</summary>
+    public string BulkDoneLabel => BulkDonePlan().Text;
+
+    /// <summary>按钮下半行：要完成的条数，单独放一行更醒目。</summary>
+    public string BulkDoneCountText => BulkDonePlan().Items.Count.ToString();
+
+    public string BulkDoneText => $"{BulkDoneLabel}（{BulkDoneCountText}）";
 
     private (string Text, List<TaskItem> Items) BulkDonePlan()
     {
-        if (Mode is ViewMode.Done or ViewMode.Focus or ViewMode.Schedule) return (string.Empty, []);
+        if (Mode is ViewMode.Done or ViewMode.Focus or ViewMode.Schedule or ViewMode.Month)
+            return (string.Empty, []);
 
         var active = _all.Where(t => !t.Deleted && !t.Done).ToList();
 
@@ -866,7 +903,9 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task Sync()
     {
-        if (_sync is null)
+        var sync = _sync;
+
+        if (sync is null)
         {
             SyncText = "同步客户端未初始化";
             return;
@@ -875,7 +914,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (!await HasAccountAsync())
         {
             // 两种模式都能在设置页配账号：远程填服务器账号，本机填本机账号
-            if (_sync.IsRemote)
+            if (sync.IsRemote)
             {
                 SyncText = "还没登录服务器：在「设置 → 同步服务器」里填地址和账号";
                 AccountRequired?.Invoke();
@@ -888,7 +927,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         // 换账号 = 换一份数据：清空本地、改从新账号全量拉取。清空不可撤销，必须先问过用户
-        if (_sync.HasAccountChanged && _sync.IsRemote)
+        if (sync.HasAccountChanged && sync.IsRemote)
         {
             var question =
                 "检测到同步账号已更换。\n\n" +
@@ -904,8 +943,9 @@ public sealed partial class MainViewModel : ObservableObject
 
             try
             {
-                // 先登录新账号，成功后才清空本地：失败时本地数据保持原样
-                await _sync.ApplyAccountSwitchAsync();
+                // 先登录新账号，成功后才清空本地：失败时本地数据保持原样。
+                // 这一步里有同步的 SQLite 删除和一次阻塞登录往返，同样不能压在界面线程上。
+                await Task.Run(() => sync.ApplyAccountSwitchAsync());
             }
             catch (Exception ex)
             {
@@ -919,8 +959,11 @@ public sealed partial class MainViewModel : ObservableObject
         Toast(SyncToastInfo.Working());
         try
         {
-            // 一次往返：把本地改动推上去，同时把另一端的新改动拉回来
-            var stats = await _sync.SyncAsync();
+            // 一次往返：把本地改动推上去，同时把另一端的新改动拉回来。
+            // 全量快照的读取和逐行落库都是同步 SQLite 调用，整段必须离开界面线程，
+            // 否则每次点「同步」都要冻一下界面（Task.Run 里没有同步上下文，
+            // SyncAsync 内部的 await 续延也会留在后台线程跑完）。
+            var stats = await Task.Run(() => sync.SyncAsync());
 
             // 手机端改过闹钟开关 / 删过闹钟：让「专注 → 闹钟」列表重新读一遍
             if (stats.AlarmsUpdated > 0) _alarms?.NotifyChanged();
@@ -1314,6 +1357,8 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsDoneActive));
         OnPropertyChanged(nameof(IsScheduleActive));
         OnPropertyChanged(nameof(CanBulkDone));
+        OnPropertyChanged(nameof(BulkDoneLabel));
+        OnPropertyChanged(nameof(BulkDoneCountText));
         OnPropertyChanged(nameof(BulkDoneText));
     }
 
@@ -1410,7 +1455,7 @@ public sealed partial class MainViewModel : ObservableObject
         var groups = new List<TaskGroup>();
 
         void Add(string header, IEnumerable<TaskItem> source, string brush = "text-secondary",
-            bool keepEmpty = false, string emptyHint = "")
+            bool keepEmpty = false)
         {
             var items = source
                 .OrderBy(t => t.AnchorAt ?? long.MaxValue)
@@ -1424,8 +1469,7 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 Header = header,
                 HeaderBrushKey = brush,
-                Items = items,
-                EmptyHint = emptyHint
+                Items = items
             });
         }
 
@@ -1451,8 +1495,7 @@ public sealed partial class MainViewModel : ObservableObject
                     Add($"{WeekName(day)} · {day:M月d日}",
                         visible.Where(t => LocalDateOf(t) == day),
                         day == today ? "accent" : "text-secondary",
-                        keepEmpty: true,
-                        emptyHint: "暂无安排");
+                        keepEmpty: true);
                 }
                 break;
             }
@@ -1486,7 +1529,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         TimelineGroups.Clear();
 
-        void Add(string header, IEnumerable<TaskItem> source, string brush, string emptyHint = "",
+        void Add(string header, IEnumerable<TaskItem> source, string brush,
             int collapseOver = int.MaxValue)
         {
             var items = source
@@ -1495,7 +1538,7 @@ public sealed partial class MainViewModel : ObservableObject
                 .Select(t => new TaskViewModel(t))
                 .ToList();
 
-            if (items.Count == 0 && emptyHint.Length == 0) return;
+            if (items.Count == 0) return;
 
             // 条目太多就默认折起来：日视图一进来先看见时间轴，而不是一屏待勾选的逾期
             var collapsible = items.Count > collapseOver;
@@ -1505,7 +1548,6 @@ public sealed partial class MainViewModel : ObservableObject
                 Header = header,
                 HeaderBrushKey = brush,
                 Items = items,
-                EmptyHint = emptyHint,
                 CanCollapse = collapsible,
                 IsCollapsed = collapsible
             });
@@ -1813,72 +1855,20 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void UpdateHeader()
     {
-        switch (Mode)
+        MainTitle = Mode switch
         {
-            case ViewMode.Today:
-                MainTitle = "今天";
-                MainSubtitle = $"{DateTime.Today.ToString("M月d日 dddd", Zh)} · {TodayCount} 项未完成";
-                break;
-
-            case ViewMode.Day:
-            {
-                var count = _all.Count(t => !t.Deleted && LocalDateOf(t) == SelectedDate.Date);
-                MainTitle = SelectedDate.ToString("M月d日", Zh);
-                MainSubtitle = $"{SelectedDate.ToString("dddd", Zh)} · {count} 项";
-                break;
-            }
-
-            case ViewMode.Week:
-            {
-                var monday = MondayOf(SelectedDate);
-                var sunday = monday.AddDays(6);
-                var count = _all.Count(t => !t.Deleted && LocalDateOf(t) is DateTime d && d >= monday && d <= sunday);
-                MainTitle = $"{monday.ToString("M月d日", Zh)} – {sunday.ToString("M月d日", Zh)}";
-                MainSubtitle = $"{monday.ToString("dddd", Zh)}起 · {count} 项";
-                break;
-            }
-
-            case ViewMode.Month:
-            {
-                var count = _all.Count(t => !t.Deleted && LocalDateOf(t) is DateTime d && d.Month == DisplayMonth.Month && d.Year == DisplayMonth.Year);
-                MainTitle = DisplayMonth.ToString("yyyy年M月", Zh);
-                MainSubtitle = $"{count} 项";
-                break;
-            }
-
-            case ViewMode.Year:
-            {
-                var count = _all.Count(t => !t.Deleted && LocalDateOf(t) is DateTime d && d.Year == DisplayMonth.Year);
-                MainTitle = $"{DisplayMonth.Year} 年";
-                MainSubtitle = $"{count} 项";
-                break;
-            }
-
-            case ViewMode.All:
-                MainTitle = "全部";
-                MainSubtitle = $"{AllCount} 项未完成";
-                break;
-
-            case ViewMode.Done:
-                MainTitle = "已完成";
-                MainSubtitle = $"{DoneCount} 项";
-                break;
-
-            case ViewMode.Focus:
-                MainTitle = "专注";
-                MainSubtitle = "倒计时 · 秒表 · 闹钟";
-                break;
-
-            case ViewMode.Schedule:
-                MainTitle = "课表";
-                MainSubtitle = $"{Schedule.Term} · 第 1 周 {Schedule.Week1Monday} · 共 {Schedule.EventsCount} 节课";
-                break;
-
-            case ViewMode.Notes:
-                MainTitle = "便签";
-                MainSubtitle = Notes.Count == 0 ? "随手记一段，双端同步" : $"{Notes.Count} 条 · 手机与电脑共享";
-                break;
-        }
+            ViewMode.Today => "今天",
+            ViewMode.Day => SelectedDate.ToString("M月d日", Zh),
+            ViewMode.Week => $"{MondayOf(SelectedDate).ToString("M月d日", Zh)} – {MondayOf(SelectedDate).AddDays(6).ToString("M月d日", Zh)}",
+            ViewMode.Month => DisplayMonth.ToString("yyyy年M月", Zh),
+            ViewMode.Year => $"{DisplayMonth.Year} 年",
+            ViewMode.All => "全部",
+            ViewMode.Done => "已完成",
+            ViewMode.Focus => "专注",
+            ViewMode.Schedule => "课表",
+            ViewMode.Notes => "便签",
+            _ => MainTitle
+        };
     }
 
     // ---------------- 工具 ----------------

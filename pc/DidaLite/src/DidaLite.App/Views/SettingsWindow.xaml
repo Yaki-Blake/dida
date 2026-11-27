@@ -33,16 +33,12 @@
 
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="24,20,24,8">
-                <TextBlock Text="设置" Style="{StaticResource PageTitle}" />
-                <TextBlock Text="先填好服务器地址和账号，点「登录」确认能连上；之后电脑和手机都用同一份数据。"
-                           Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,6,0,16" />
+                <TextBlock Text="设置" Style="{StaticResource PageTitle}" Margin="0,0,0,16" />
 
                 <!-- 同步服务器：地址 + 账号 + 密码，点「登录」当场验证能不能连上 -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="同步服务器" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="电脑和手机都连这台服务器：数据存在它上面，电脑关机也不影响手机用。"
-                                   Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,4,0,0" />
 
                         <TextBlock Text="服务器地址" Style="{StaticResource FieldLabel}" />
                         <TextBox x:Name="RemoteUrlBox" Style="{StaticResource InputTextBox}"
@@ -75,10 +71,8 @@
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="同步信息" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="启动时会自动同步一次，也可以随时手动同步。"
-                                   Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,4,0,8" />
 
-                        <Grid>
+                        <Grid Margin="0,12,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
@@ -97,10 +91,8 @@
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="快捷键" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="点一下再按下组合键，用来随时唤出主窗口；Esc 取消。用不到时可以点右边「关闭」，下次启动也保持关闭。"
-                                   Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,4,0,8" />
 
-                        <StackPanel Orientation="Horizontal">
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                             <Button x:Name="HotkeyButton" Style="{StaticResource GhostButton}"
                                     Click="HotkeyButton_Click"
                                     AutomationProperties.AutomationId="HotkeyButton"
@@ -139,11 +131,9 @@
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="启动" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="登录 Windows 后自动启动并收进托盘，之后双击图标是秒开。"
-                                   Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,4,0,0" />
                         <CheckBox Content="开机自动启动" Style="{StaticResource FieldCheckBox}"
                                   IsChecked="{Binding IsAutoStart, Mode=TwoWay}"
-                                  Margin="0,8,0,0"
+                                  Margin="0,12,0,0"
                                   AutomationProperties.AutomationId="AutoStartToggle" />
                     </StackPanel>
                 </Border>
@@ -154,7 +144,7 @@
                         <TextBlock Text="外观" Style="{StaticResource SectionTitle}" />
                         <CheckBox Content="深色模式" Style="{StaticResource FieldCheckBox}"
                                   IsChecked="{Binding IsDarkTheme, Mode=TwoWay}"
-                                  Margin="0,8,0,0"
+                                  Margin="0,12,0,0"
                                   AutomationProperties.AutomationId="DarkModeToggle" />
                     </StackPanel>
                 </Border>

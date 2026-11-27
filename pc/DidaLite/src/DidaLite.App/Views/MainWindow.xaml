@@ -138,19 +138,6 @@
                         </Style>
                     </ItemsControl.Style>
                 </ItemsControl>
-
-                <TextBlock Text="{Binding EmptyHint}" Margin="16,2,16,8">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock" BasedOn="{StaticResource HintText}">
-                            <Setter Property="Visibility" Value="Collapsed" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsEmpty}" Value="True">
-                                    <Setter Property="Visibility" Value="Visible" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
             </StackPanel>
         </DataTemplate>
 
@@ -164,6 +151,7 @@
             <Border Background="Transparent"
                     Cursor="Hand"
                     ClipToBounds="True"
+                    beh:ClickPop.Enabled="True"
                     ToolTip="{Binding Tooltip}"
                     MouseLeftButtonUp="DayCourse_Click">
                 <Border Background="{DynamicResource accent-weak}"
@@ -171,7 +159,7 @@
                         BorderThickness="3,0,0,0"
                         CornerRadius="{StaticResource RadiusS}"
                         Margin="0,1,5,1"
-                        Padding="9,5,6,0">
+                        Padding="9,3,6,0">
                     <StackPanel VerticalAlignment="Top">
                         <TextBlock Text="{Binding Name}"
                                    FontSize="{StaticResource FontSize12}"
@@ -181,19 +169,19 @@
                         <TextBlock Text="{Binding TimeText}"
                                    FontFamily="{StaticResource NumericFont}"
                                    FontSize="{StaticResource FontSize11}"
-                                   Margin="0,2,0,0"
+                                   Margin="0,1,0,0"
                                    Foreground="{DynamicResource text-secondary}"
                                    TextTrimming="CharacterEllipsis"
                                    Visibility="{Binding ShowTime, Converter={StaticResource BoolToVis}}" />
                         <TextBlock Text="{Binding RoomText}"
                                    FontSize="{StaticResource FontSize11}"
-                                   Margin="0,2,0,0"
+                                   Margin="0,1,0,0"
                                    Foreground="{DynamicResource text-secondary}"
                                    TextTrimming="CharacterEllipsis"
                                    Visibility="{Binding ShowRoom, Converter={StaticResource BoolToVis}}" />
                         <TextBlock Text="{Binding TeacherText}"
                                    FontSize="{StaticResource FontSize11}"
-                                   Margin="0,2,0,0"
+                                   Margin="0,1,0,0"
                                    Foreground="{DynamicResource text-secondary}"
                                    TextTrimming="CharacterEllipsis"
                                    Visibility="{Binding ShowTeacher, Converter={StaticResource BoolToVis}}" />
@@ -209,6 +197,7 @@
             <Button Style="{StaticResource TimelineBlockButton}"
                     HorizontalContentAlignment="Stretch"
                     Margin="0,1,4,1"
+                    beh:ClickPop.Enabled="True"
                     Command="{Binding DataContext.SelectTaskCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                     CommandParameter="{Binding}"
                     ToolTip="{Binding Title}">
@@ -251,14 +240,25 @@
         <!-- 日视图时间轴上的一块日程：块高即时长，点开是详情 -->
         <DataTemplate x:Key="TimelineBlock">
             <Button Style="{StaticResource TimelineBlockButton}"
+                    beh:ClickPop.Enabled="True"
                     Command="{Binding DataContext.SelectTaskCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                     CommandParameter="{Binding Task}">
-                <Border Background="{DynamicResource accent-weak}"
-                        BorderBrush="{DynamicResource accent}"
+                <Border BorderBrush="{DynamicResource accent}"
                         BorderThickness="3,0,0,0"
                         CornerRadius="{StaticResource RadiusS}"
                         Padding="8,4"
                         Margin="0,1,0,1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="{DynamicResource accent-weak}" />
+                            <Style.Triggers>
+                                <!-- 悬停反馈只做在卡片上：块比整行窄时，按钮底板保持透明，右侧不会漏出白框 -->
+                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True">
+                                    <Setter Property="Background" Value="{DynamicResource accent-weak-hover}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <StackPanel VerticalAlignment="Top">
                         <TextBlock Text="{Binding Task.Title}" TextTrimming="CharacterEllipsis">
                             <TextBlock.Style>
@@ -287,19 +287,27 @@
         </DataTemplate>
     </Window.Resources>
 
+    <!-- 外层只做「布局层 + 浮层」两张皮：RootGrid 负责排布，下面的浮层绝对定位贴在上面，
+         它们的尺寸绝不参与 RootGrid 头部 Auto 行的测量，弹窗出现/消失不会挤动时间轴 -->
+    <Grid x:Name="OverlayRoot">
     <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <!-- 顶部头部横跨主区与详情区：开关详情、切视图都不挪导航栏 -->
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <!-- 侧栏可拖窄到 180px（默认仍是 272px），也能向右拖宽 -->
             <ColumnDefinition x:Name="SidebarColumn" Width="{StaticResource SidebarColumnWidth}" MinWidth="180" />
             <ColumnDefinition Width="Auto" />
-            <!-- 最小宽度由头部「标题 + 副标题」实际需要决定，见 UpdateMainColumnMinWidth -->
+            <!-- 最小宽度由头部标题与按钮组的实际需要决定，见 UpdateMainColumnMinWidth -->
             <ColumnDefinition x:Name="MainColumn" Width="*" MinWidth="300" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
         <!-- ============ 侧栏 ============ -->
         <Border x:Name="SidebarPanel"
-                Grid.Column="0"
+                Grid.Column="0" Grid.RowSpan="2"
                 Background="{DynamicResource bg-surface}"
                 BorderBrush="{DynamicResource line}"
                 BorderThickness="0,0,1,0">
@@ -408,8 +416,7 @@
                 <StackPanel Grid.Row="3" Margin="16,0,16,16">
                     <Button Style="{StaticResource SettingsButton}"
                             Click="SettingsButton_Click"
-                            AutomationProperties.AutomationId="SettingsButton"
-                            ToolTip="服务器地址、用户信息、同步、快捷键与外观">
+                            AutomationProperties.AutomationId="SettingsButton">
                         <StackPanel Orientation="Horizontal">
                             <Path Width="15" Height="15" Stretch="Uniform"
                                   Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
@@ -423,13 +430,12 @@
 
         <!-- 侧栏与日程之间的分隔：10px 命中区，可左右拖动改变侧栏宽度，右极限由头部文字决定 -->
         <Thumb x:Name="SidebarSplitter"
-               Grid.Column="1"
+               Grid.Column="1" Grid.RowSpan="2"
                Width="10"
                HorizontalAlignment="Stretch"
                VerticalAlignment="Stretch"
                Background="Transparent"
                Cursor="SizeWE"
-               ToolTip="左右拖动调整左侧栏宽度"
                AutomationProperties.AutomationId="SidebarSplitter"
                DragStarted="SidebarSplitter_DragStarted"
                DragDelta="SidebarSplitter_DragDelta">
@@ -452,133 +458,122 @@
             </Thumb.Template>
         </Thumb>
 
+        <Grid x:Name="HeaderBar" Grid.Row="0" Grid.Column="2" Grid.ColumnSpan="2" Height="{StaticResource HeaderHeight}" Margin="20,0,20,0">
+            <Grid.ColumnDefinitions>
+                <!-- 左标题可压缩（副标题走省略号），右侧按钮组保持原宽。
+                     这里千万别用 Auto 列：头部一长就会反过来把侧栏挤窄。 -->
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock x:Name="HeaderLeft" Text="{Binding MainTitle}"
+                       Style="{StaticResource PageTitle}" VerticalAlignment="Center"
+                       SizeChanged="Header_SizeChanged" />
+
+            <StackPanel x:Name="HeaderRight" Grid.Column="1" Orientation="Horizontal"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        SizeChanged="Header_SizeChanged">
+                <Button Command="{Binding ToggleAllWeeksCommand}" Margin="0,0,8,0"
+                        beh:FadeSlide.Enabled="True">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource OutlineButton}">
+                            <Setter Property="Content" Value="{Binding WeekToggleAllText}" />
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsMonthView}" Value="True" />
+                                        <Condition Binding="{Binding HasExpandableWeek}" Value="True" />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+
+                <!-- 一键完成：今天 / 全部视图先清逾期，其余视图清选中日。条数留在悬浮提示里 -->
+                <Button Style="{StaticResource OutlineButton}"
+                        Content="{Binding BulkDoneLabel}"
+                        Command="{Binding CompleteListedCommand}"
+                        Margin="0,0,8,0"
+                        Height="40" Padding="10,3"
+                        beh:FadeSlide.Enabled="True"
+                        Visibility="{Binding CanBulkDone, Converter={StaticResource BoolToVis}}"
+                        ToolTip="{Binding BulkDoneText}" />
+
+                <Border Background="{DynamicResource bg-surface}"
+                        BorderBrush="{DynamicResource line}" BorderThickness="1"
+                        CornerRadius="{StaticResource RadiusM}" Padding="2">
+                    <Grid x:Name="SegmentBar">
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="ScheduleSegmentButton"
+                                    Content="课表" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding IsScheduleSegment}"
+                                    CommandParameter="schedule"
+                                    Click="Segment_Click" />
+                            <Button x:Name="DaySegmentButton"
+                                    Content="日" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding IsDaySegment}"
+                                    CommandParameter="day"
+                                    Click="Segment_Click" />
+                            <Button x:Name="WeekSegmentButton"
+                                    Content="周" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding IsWeekSegment}"
+                                    CommandParameter="week"
+                                    Click="Segment_Click" />
+                            <Button x:Name="MonthSegmentButton"
+                                    Content="月" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding IsMonthSegment}"
+                                    CommandParameter="month"
+                                    Click="Segment_Click" />
+                            <Button x:Name="YearSegmentButton"
+                                    Content="年" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding IsYearSegment}"
+                                    CommandParameter="year"
+                                    Click="Segment_Click" />
+                            <Button x:Name="FocusSegmentButton"
+                                    Content="专注" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding IsFocusSegment}"
+                                    CommandParameter="focus"
+                                    Click="Segment_Click" />
+                            <Button x:Name="NotesSegmentButton"
+                                    Content="便签" Style="{StaticResource SegmentButton}"
+                                    Tag="{Binding IsNotesSegment}"
+                                    CommandParameter="notes"
+                                    Click="Segment_Click" />
+                        </StackPanel>
+
+                        <!-- 切换时从旧按钮飞向新按钮的绿色小圆点 -->
+                        <Canvas x:Name="SegmentDotLayer" IsHitTestVisible="False">
+                            <Border x:Name="SegmentDot"
+                                    Width="8" Height="8"
+                                    CornerRadius="4"
+                                    Background="{DynamicResource accent}"
+                                    RenderTransformOrigin="0.5,0.5"
+                                    Visibility="Collapsed">
+                                <Border.RenderTransform>
+                                    <ScaleTransform x:Name="SegmentDotScale" />
+                                </Border.RenderTransform>
+                            </Border>
+                        </Canvas>
+                    </Grid>
+                </Border>
+
+                <Button Content="同步" Style="{StaticResource OutlineButton}"
+                        Command="{Binding SyncCommand}" Margin="8,0,0,0" />
+
+                <Button Content="+ 添加" Style="{StaticResource PrimaryButton}"
+                        Command="{Binding NewTaskCommand}" Margin="8,0,0,0" />
+            </StackPanel>
+        </Grid>
+
+
         <!-- ============ 主区 ============ -->
-        <Grid Grid.Column="2">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-
-            <Grid x:Name="HeaderBar" Grid.Row="0" Height="{StaticResource HeaderHeight}" Margin="20,0,20,0">
-                <Grid.ColumnDefinitions>
-                    <!-- 左标题可压缩（副标题走省略号），右侧按钮组保持原宽。
-                         这里千万别用 Auto 列：头部一长就会反过来把侧栏挤窄。 -->
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <Grid x:Name="HeaderLeft" Grid.Column="0" VerticalAlignment="Center"
-                      SizeChanged="Header_SizeChanged">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding MainTitle}" Style="{StaticResource PageTitle}"
-                               VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding MainSubtitle}" Style="{StaticResource MetaText}"
-                               Margin="10,0,0,0" VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" />
-                </Grid>
-
-                <StackPanel x:Name="HeaderRight" Grid.Column="1" Orientation="Horizontal"
-                            HorizontalAlignment="Right" VerticalAlignment="Center"
-                            SizeChanged="Header_SizeChanged">
-                    <Button Command="{Binding ToggleAllWeeksCommand}" Margin="0,0,8,0">
-                        <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
-                                <Setter Property="Content" Value="{Binding WeekToggleAllText}" />
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <MultiDataTrigger>
-                                        <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding IsMonthView}" Value="True" />
-                                            <Condition Binding="{Binding HasExpandableWeek}" Value="True" />
-                                        </MultiDataTrigger.Conditions>
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </MultiDataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                    </Button>
-
-                    <!-- 一键完成：今天 / 全部视图先清逾期，其余视图清选中日。
-                         放在「日/周/月/年」段控左边，靠近标题那一侧 -->
-                    <Button Style="{StaticResource GhostButton}"
-                            Content="{Binding BulkDoneText}"
-                            Command="{Binding CompleteListedCommand}"
-                            Margin="0,0,8,0"
-                            Visibility="{Binding CanBulkDone, Converter={StaticResource BoolToVis}}"
-                            ToolTip="把逾期（或选中日）的未完成日程全部打勾，两秒内可撤销" />
-
-                    <Border Background="{DynamicResource bg-surface}"
-                            BorderBrush="{DynamicResource line}" BorderThickness="1"
-                            CornerRadius="{StaticResource RadiusM}" Padding="2">
-                        <Grid x:Name="SegmentBar">
-                            <StackPanel Orientation="Horizontal">
-                                <Button x:Name="ScheduleSegmentButton"
-                                        Content="课表" Style="{StaticResource SegmentButton}"
-                                        Tag="{Binding IsScheduleSegment}"
-                                        CommandParameter="schedule"
-                                        Click="Segment_Click" />
-                                <Button x:Name="DaySegmentButton"
-                                        Content="日" Style="{StaticResource SegmentButton}"
-                                        Tag="{Binding IsDaySegment}"
-                                        CommandParameter="day"
-                                        Click="Segment_Click" />
-                                <Button x:Name="WeekSegmentButton"
-                                        Content="周" Style="{StaticResource SegmentButton}"
-                                        Tag="{Binding IsWeekSegment}"
-                                        CommandParameter="week"
-                                        Click="Segment_Click" />
-                                <Button x:Name="MonthSegmentButton"
-                                        Content="月" Style="{StaticResource SegmentButton}"
-                                        Tag="{Binding IsMonthSegment}"
-                                        CommandParameter="month"
-                                        Click="Segment_Click" />
-                                <Button x:Name="YearSegmentButton"
-                                        Content="年" Style="{StaticResource SegmentButton}"
-                                        Tag="{Binding IsYearSegment}"
-                                        CommandParameter="year"
-                                        Click="Segment_Click" />
-                                <Button x:Name="FocusSegmentButton"
-                                        Content="专注" Style="{StaticResource SegmentButton}"
-                                        Tag="{Binding IsFocusSegment}"
-                                        CommandParameter="focus"
-                                        Click="Segment_Click" />
-                                <Button x:Name="NotesSegmentButton"
-                                        Content="便签" Style="{StaticResource SegmentButton}"
-                                        Tag="{Binding IsNotesSegment}"
-                                        CommandParameter="notes"
-                                        Click="Segment_Click" />
-                            </StackPanel>
-
-                            <!-- 切换时从旧按钮飞向新按钮的绿色小圆点 -->
-                            <Canvas x:Name="SegmentDotLayer" IsHitTestVisible="False">
-                                <Border x:Name="SegmentDot"
-                                        Width="8" Height="8"
-                                        CornerRadius="4"
-                                        Background="{DynamicResource accent}"
-                                        RenderTransformOrigin="0.5,0.5"
-                                        Visibility="Collapsed">
-                                    <Border.RenderTransform>
-                                        <ScaleTransform x:Name="SegmentDotScale" />
-                                    </Border.RenderTransform>
-                                </Border>
-                            </Canvas>
-                        </Grid>
-                    </Border>
-
-                    <Button Content="同步" Style="{StaticResource GhostButton}"
-                            beh:PressFeedback.Enabled="True"
-                            Command="{Binding SyncCommand}" Margin="8,0,0,0" />
-
-                    <Button Content="+ 添加" Style="{StaticResource PrimaryButton}"
-                            Command="{Binding NewTaskCommand}" Margin="8,0,0,0" />
-                </StackPanel>
-            </Grid>
+        <Grid Grid.Column="2" Grid.Row="1">
 
             <!-- 内容区：切换视图时做水平翻页动画 -->
-            <Grid x:Name="ContentHost" Grid.Row="1">
+            <Grid x:Name="ContentHost" Grid.Row="0">
                 <Grid.RenderTransform>
                     <TranslateTransform x:Name="ContentSlide" />
                 </Grid.RenderTransform>
@@ -623,12 +618,6 @@
                                         </ItemsPanelTemplate>
                                     </ItemsControl.ItemsPanel>
                                 </ItemsControl>
-
-                                <TextBlock Text="这天没课"
-                                           Style="{StaticResource HintText}"
-                                           Margin="12,8,0,0"
-                                           VerticalAlignment="Top"
-                                           Visibility="{Binding IsCourseLaneEmpty, Converter={StaticResource BoolToVis}}" />
                             </Grid>
 
                             <!-- 全天事件：紧贴时间轴右侧的第一条竖带，从轴顶拉到轴底。
@@ -690,8 +679,6 @@
                             Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}">
                     <TextBlock Text="这里还没有任务" Style="{StaticResource SectionTitle}"
                                Foreground="{DynamicResource text-secondary}" HorizontalAlignment="Center" />
-                    <TextBlock Text="点击右上角「添加」新建任务" Style="{StaticResource HintText}"
-                               Margin="0,6,0,0" HorizontalAlignment="Center" />
                 </StackPanel>
 
                 <!-- 撤销条 -->
@@ -712,7 +699,7 @@
 
         <!-- ============ 详情 / 新建 ============ -->
         <Border x:Name="DetailPanel"
-                Grid.Column="3"
+                Grid.Column="3" Grid.Row="1"
                 Width="{StaticResource DetailWidth}"
                 Background="{DynamicResource bg-surface}"
                 BorderBrush="{DynamicResource line}"
@@ -723,7 +710,11 @@
                 <TranslateTransform x:Name="DetailSlide" X="24" />
             </Border.RenderTransform>
 
-            <Grid>
+            <!-- 详情内容单独一层：面板展开时整体滑入，面板已展开时切换日程只让这一层淡入上浮 -->
+            <Grid x:Name="DetailBody">
+                <Grid.RenderTransform>
+                    <TranslateTransform x:Name="DetailBodySlide" />
+                </Grid.RenderTransform>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -737,7 +728,8 @@
                             Command="{Binding CloseDetailCommand}" Padding="8,0" />
                 </Grid>
 
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="16,0,16,0">
+                <ScrollViewer x:Name="DetailScroll" Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto" Margin="16,0,16,0">
                     <StackPanel Margin="0,0,0,8">
                         <TextBlock Text="主题" Style="{StaticResource HintText}" Margin="0,8,0,4" />
                         <TextBox x:Name="TitleBox"
@@ -809,24 +801,74 @@
             </Grid>
         </Border>
 
+        <!-- 右侧详情的左右拖动条：贴着面板左边缘，压到最窄时日期框刚好放得下完整日期 -->
+        <Thumb x:Name="DetailSplitter"
+               Grid.Column="3" Grid.Row="1"
+               Width="10" Margin="-5,0,0,0"
+               HorizontalAlignment="Left" VerticalAlignment="Stretch"
+               Panel.ZIndex="5"
+               Background="Transparent"
+               Cursor="SizeWE"
+               AutomationProperties.AutomationId="DetailSplitter"
+               Visibility="Collapsed"
+               DragStarted="DetailSplitter_DragStarted"
+               DragDelta="DetailSplitter_DragDelta">
+            <Thumb.Template>
+                <ControlTemplate TargetType="Thumb">
+                    <Border Background="Transparent">
+                        <Border x:Name="Grip" Width="2" Height="36"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                CornerRadius="1" Background="{DynamicResource line}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource accent}" />
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Grip" Property="Background" Value="{DynamicResource accent}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Thumb.Template>
+        </Thumb>
+
+        <!-- 课程详情：日视图点课程带时用它顶替任务详情，位置、宽度、边框跟任务详情完全一致 -->
+        <Border x:Name="CoursePanel"
+                Grid.Column="3" Grid.Row="1"
+                Width="{StaticResource DetailWidth}"
+                Background="{DynamicResource bg-surface}"
+                BorderBrush="{DynamicResource line}"
+                BorderThickness="1,0,0,0"
+                Padding="20,16"
+                Opacity="0"
+                Visibility="{Binding IsCourseDetailVisible, Converter={StaticResource BoolToVis}}">
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="CourseSlide" X="24" />
+            </Border.RenderTransform>
+            <views:CourseDetailContent DataContext="{Binding Schedule}"
+                                       CloseCommand="{Binding DataContext.CloseCourseDetailCommand,
+                                                      RelativeSource={RelativeSource AncestorType=Window}}" />
+        </Border>
+
+    </Grid>
+
+        <!-- ============ 覆盖层：与布局层平级，尺寸不参与任何行高/列宽测量 ============ -->
+
         <!-- 同步浮层：贴着右上角「同步 / 添加」下方往下排，绿底白字、底边走 4 秒进度条，
              走完自己向上淡出；点一下立刻收起。位置对齐头部右边距（20） -->
         <Canvas x:Name="SyncToastLayer"
-                Grid.ColumnSpan="4"
                 HorizontalAlignment="Right" VerticalAlignment="Top"
                 Margin="0,62,20,0"
                 Panel.ZIndex="99" />
 
         <!-- 删除特效层：粒子画在全窗最上面，不吃鼠标 -->
         <Canvas x:Name="FxLayer"
-                Grid.ColumnSpan="4"
                 IsHitTestVisible="False"
                 ClipToBounds="True"
                 Panel.ZIndex="100" />
 
         <!-- 键盘删除确认：按 Enter 确认，Esc 取消 -->
         <Border x:Name="ConfirmBar"
-                Grid.ColumnSpan="4"
                 HorizontalAlignment="Center" VerticalAlignment="Bottom"
                 Margin="0,0,0,24"
                 Background="{DynamicResource bg-surface}"
@@ -838,9 +880,10 @@
             <StackPanel Orientation="Horizontal">
                 <TextBlock x:Name="ConfirmText" Style="{StaticResource MetaText}"
                            MaxWidth="420" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                <TextBlock Text="按 Enter 确认 · Esc 取消"
-                           Style="{StaticResource HintText}"
-                           Margin="12,0,0,0" VerticalAlignment="Center" />
+                <Button Content="删除" Style="{StaticResource PrimaryButton}"
+                        Click="ConfirmDeleteButton_Click" Margin="16,0,0,0" />
+                <Button Content="取消" Style="{StaticResource GhostButton}"
+                        Click="CancelDeleteButton_Click" Margin="8,0,0,0" />
             </StackPanel>
         </Border>
     </Grid>

@@ -6,16 +6,15 @@ namespace DidaLite.App.Views;
 public partial class AlarmRingWindow : Window
 {
     public AlarmRingWindow(AlarmItem alarm)
-        : this("闹钟", alarm.TimeText, alarm.Label, true)
+        : this(alarm.TimeText, alarm.Label, true)
     {
     }
 
-    /// <summary>闹钟与倒计时共用的小窗：标题、主时间、说明文案、是否提供「稍后」。</summary>
-    public AlarmRingWindow(string title, string timeText, string? label, bool allowSnooze)
+    /// <summary>闹钟与倒计时共用的小窗：主时间、标签、是否提供「稍后」。</summary>
+    public AlarmRingWindow(string timeText, string? label, bool allowSnooze)
     {
         InitializeComponent();
 
-        TitleText.Text = title;
         TimeText.Text = timeText;
 
         if (!string.IsNullOrWhiteSpace(label))

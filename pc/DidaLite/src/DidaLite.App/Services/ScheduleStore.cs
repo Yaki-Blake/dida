@@ -30,8 +30,11 @@ public sealed class ScheduleEvent
     [JsonPropertyName("period")] public string Period { get; set; } = string.Empty;
     [JsonPropertyName("slot")] public int Slot { get; set; }
 
-    /// <summary>这门课是否写了备注；仅界面用，不进入 5080 契约与 ICS。</summary>
+    /// <summary>这门课是否写了长期备注；仅界面用，不进入 5080 契约与 ICS。</summary>
     [JsonIgnore] public bool HasNote { get; set; }
+
+    /// <summary>这一节课是否写了单次备注（只对这一天的这一次有效）。</summary>
+    [JsonIgnore] public bool HasOnceNote { get; set; }
 }
 
 /// <summary>随程序附带的课表快照文件（schedule.json）。</summary>
@@ -228,107 +231,5 @@ public sealed class ScheduleStore
             .ToArray();
 
         return new { count = courses.Length, courses };
-    }
-}
-
-/// <summary>
-/// 按课程名保存的私有备注。独立于 schedule.json / schedule.ics，
-/// 所以导入、清空、重新同步课表都不会删掉用户写的内容。
-/// 键用课程名，同一门课的每一次课看到的是同一份备注。
-/// </summary>
-public static class ScheduleNotes
-{
-    private sealed class NoteFile
-    {
-        [JsonPropertyName("version")] public int Version { get; set; } = 1;
-        [JsonPropertyName("notes")] public Dictionary<string, string> Notes { get; set; } =
-            new Dictionary<string, string>(StringComparer.Ordinal);
-    }
-
-    private static readonly object Gate = new();
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        WriteIndented = false,
-    };
-    private static readonly UTF8Encoding Utf8NoBom = new(false);
-    private static Dictionary<string, string> _notes = Load();
-
-    /// <summary>写入位置固定在用户数据目录，和课表本体一致；读取时兼容 exe 同目录的旧文件。</summary>
-    public static string FilePath => DataPaths.Write("schedule_notes.json");
-
-    private static Dictionary<string, string> Load()
-    {
-        try
-        {
-            if (DataPaths.FindReadable("schedule_notes.json") is not { } path)
-                return new Dictionary<string, string>(StringComparer.Ordinal);
-            var file = JsonSerializer.Deserialize<NoteFile>(File.ReadAllText(path, Encoding.UTF8), JsonOptions);
-            return file?.Notes is { } notes
-                ? new Dictionary<string, string>(notes, StringComparer.Ordinal)
-                : new Dictionary<string, string>(StringComparer.Ordinal);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"课表备注读取失败：{ex.Message}");
-            return new Dictionary<string, string>(StringComparer.Ordinal);
-        }
-    }
-
-    public static int Count { get { lock (Gate) return _notes.Count; } }
-
-    public static string Get(string course)
-    {
-        if (string.IsNullOrWhiteSpace(course)) return string.Empty;
-        lock (Gate) return _notes.TryGetValue(course.Trim(), out var text) ? text : string.Empty;
-    }
-
-    public static bool Has(string course) => !string.IsNullOrWhiteSpace(Get(course));
-
-    /// <summary>写入磁盘成功返回 true；空文本视为删除这条备注。</summary>
-    public static bool Set(string course, string? text)
-    {
-        course = (course ?? string.Empty).Trim();
-        if (course.Length == 0) return false;
-
-        lock (Gate)
-        {
-            var next = new Dictionary<string, string>(_notes, StringComparer.Ordinal);
-            if (string.IsNullOrWhiteSpace(text)) next.Remove(course);
-            else next[course] = text!;
-
-            try
-            {
-                var path = FilePath;
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path,
-                    JsonSerializer.Serialize(new NoteFile { Notes = next }, JsonOptions), Utf8NoBom);
-                _notes = next;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"课表备注写入失败：{ex.Message}");
-                return false;
-            }
-        }
-    }
-
-    public static bool Remove(string course) => Set(course, null);
-
-    /// <summary>把「已备注」标记写回内存事件，返回带标记的事件数。</summary>
-    public static int ApplyTo(IEnumerable<ScheduleEvent> events)
-    {
-        var marked = 0;
-        lock (Gate)
-        {
-            foreach (var e in events)
-            {
-                e.HasNote = _notes.TryGetValue(e.Name, out var text) && !string.IsNullOrWhiteSpace(text);
-                if (e.HasNote) marked++;
-            }
-        }
-        return marked;
     }
 }

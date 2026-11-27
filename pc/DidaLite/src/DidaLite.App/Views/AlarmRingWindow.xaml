@@ -18,11 +18,9 @@
             Margin="12"
             Effect="{DynamicResource OverlayShadow}">
         <StackPanel Margin="16">
-            <TextBlock x:Name="TitleText" Text="闹钟" Style="{StaticResource HintText}" />
             <TextBlock x:Name="TimeText"
                        Style="{StaticResource PageTitle}"
-                       FontSize="34"
-                       Margin="0,4,0,0" />
+                       FontSize="34" />
             <TextBlock x:Name="LabelText"
                        Style="{StaticResource SectionTitle}"
                        TextWrapping="Wrap"

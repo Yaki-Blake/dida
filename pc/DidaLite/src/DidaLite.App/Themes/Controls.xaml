@@ -50,6 +50,7 @@
     <!-- ================= 闹钟开关胶囊（开：绿底白字 / 关：绿框白底绿字） ================= -->
 
     <Style x:Key="AlarmTogglePill" TargetType="ToggleButton">
+        <Setter Property="beh:ClickPop.Enabled" Value="True" />
         <Setter Property="Content" Value="关闭了" />
         <Setter Property="FontSize" Value="{StaticResource FontSize11}" />
         <Setter Property="Foreground" Value="{DynamicResource accent}" />
@@ -257,16 +258,60 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
-                    <Border x:Name="bd" Background="Transparent" Padding="{StaticResource RowPadding}"
-                            CornerRadius="{StaticResource RadiusS}">
-                        <ContentPresenter VerticalAlignment="Center" />
-                    </Border>
+                    <!-- 悬停与选中各用一层底色淡入淡出：直接换 Border 的 Background 是一帧跳变，太生硬。
+                         两层都是不透明的 bg-hover，叠在一起也不会变深 -->
+                    <Grid>
+                        <Border x:Name="hoverBg" Background="{DynamicResource bg-hover}"
+                                CornerRadius="{StaticResource RadiusS}" Opacity="0" />
+                        <Border x:Name="selectedBg" Background="{DynamicResource bg-hover}"
+                                CornerRadius="{StaticResource RadiusS}" Opacity="0" />
+                        <Border Background="Transparent" Padding="{StaticResource RowPadding}"
+                                CornerRadius="{StaticResource RadiusS}">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                            <Setter TargetName="hoverBg" Property="Opacity" Value="1" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.11" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                            <Setter TargetName="selectedBg" Property="Opacity" Value="1" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="selectedBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.14" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="selectedBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -286,6 +331,7 @@
     <!-- ================= 按钮 ================= -->
 
     <Style x:Key="PrimaryButton" TargetType="Button">
+        <Setter Property="beh:ClickPop.Enabled" Value="True" />
         <Setter Property="Background" Value="{DynamicResource accent}" />
         <Setter Property="Foreground" Value="{DynamicResource on-accent}" />
         <Setter Property="FontFamily" Value="{StaticResource AppFont}" />
@@ -298,6 +344,8 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="{StaticResource RadiusM}" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
@@ -318,7 +366,10 @@
     </Style>
 
     <Style x:Key="GhostButton" TargetType="Button">
+        <Setter Property="beh:ClickPop.Enabled" Value="True" />
         <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Foreground" Value="{DynamicResource text-secondary}" />
         <Setter Property="FontFamily" Value="{StaticResource AppFont}" />
         <Setter Property="FontSize" Value="{StaticResource FontSize12}" />
@@ -329,19 +380,53 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}"
-                            CornerRadius="{StaticResource RadiusM}" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
+                    <Grid>
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{StaticResource RadiusM}" />
+                        <!-- 悬停底色单独一层：淡入淡出，不直接改 Background（那样是一帧硬切） -->
+                        <Border x:Name="hoverBg" Background="{DynamicResource bg-hover}"
+                                CornerRadius="{StaticResource RadiusM}"
+                                Margin="{TemplateBinding BorderThickness}"
+                                Opacity="0" IsHitTestVisible="False" />
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                            <Setter TargetName="hoverBg" Property="Opacity" Value="1" />
                             <Setter Property="Foreground" Value="{DynamicResource text-primary}" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.11" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- 需要一眼看见的次要操作：带一圈细边框，和纯文字的 GhostButton 区分开 -->
+    <Style x:Key="OutlineButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+        <Setter Property="Background" Value="{DynamicResource bg-surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource line}" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <Style x:Key="DangerGhostButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
@@ -409,6 +494,7 @@
     <!-- ================= 侧栏底部：设置 ================= -->
 
     <Style x:Key="SettingsButton" TargetType="Button">
+        <Setter Property="beh:ClickPop.Enabled" Value="True" />
         <Setter Property="Height" Value="34" />
         <Setter Property="FontFamily" Value="{StaticResource AppFont}" />
         <Setter Property="FontSize" Value="{StaticResource FontSize13}" />
@@ -420,15 +506,37 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                            CornerRadius="{StaticResource RadiusM}">
+                    <Grid>
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                CornerRadius="{StaticResource RadiusM}" />
+                        <Border x:Name="hoverBg" Background="{DynamicResource bg-hover}"
+                                CornerRadius="{StaticResource RadiusM}" Margin="1"
+                                Opacity="0" IsHitTestVisible="False" />
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                            <Setter TargetName="hoverBg" Property="Opacity" Value="1" />
                             <Setter Property="Foreground" Value="{DynamicResource text-primary}" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.11" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -545,16 +653,59 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="bd" Background="Transparent" CornerRadius="{StaticResource RadiusM}" Padding="10,0">
-                        <ContentPresenter VerticalAlignment="Center" />
-                    </Border>
+                    <!-- 悬停底色与选中底色分层淡入：选中层压在上面，所以选中项悬停也不会被灰底盖掉 -->
+                    <Grid>
+                        <Border x:Name="hoverBg" Background="{DynamicResource bg-hover}"
+                                CornerRadius="{StaticResource RadiusM}" Opacity="0" />
+                        <Border x:Name="checkedBg" Background="{DynamicResource accent-weak}"
+                                CornerRadius="{StaticResource RadiusM}" Opacity="0" />
+                        <Border Background="Transparent" CornerRadius="{StaticResource RadiusM}" Padding="10,0">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                            <Setter TargetName="hoverBg" Property="Opacity" Value="1" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.11" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource accent-weak}" />
+                            <Setter TargetName="checkedBg" Property="Opacity" Value="1" />
                             <Setter Property="Foreground" Value="{DynamicResource accent}" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="checkedBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.16" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="checkedBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -575,13 +726,35 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}"
-                            Padding="{StaticResource RowPadding}" CornerRadius="{StaticResource RadiusS}">
-                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
-                    </Border>
+                    <Grid>
+                        <Border x:Name="hoverBg" Background="{DynamicResource bg-hover}"
+                                CornerRadius="{StaticResource RadiusS}" Opacity="0" />
+                        <Border Background="{TemplateBinding Background}"
+                                Padding="{StaticResource RowPadding}" CornerRadius="{StaticResource RadiusS}">
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                            <Setter TargetName="hoverBg" Property="Opacity" Value="1" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.11" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -606,11 +779,8 @@
                         <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                           VerticalAlignment="Stretch" />
                     </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
+                    <!-- 悬停底色不画在按钮底板上：块比整行窄时，底板铺满整行会漏出一块白框。
+                         反馈由各卡片自己用 accent-weak-hover 表现。 -->
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -659,6 +829,7 @@
     <!-- ================= 日 / 周 / 月 分段 ================= -->
 
     <Style x:Key="SegmentButton" TargetType="Button">
+        <Setter Property="beh:ClickPop.Enabled" Value="True" />
         <Setter Property="Height" Value="28" />
         <Setter Property="Padding" Value="14,0" />
         <Setter Property="Cursor" Value="Hand" />
@@ -703,6 +874,54 @@
 
     <!-- ================= 月视图格子 ================= -->
 
+    <!-- 格子里的日程条：整条可点，点开就是这条任务的详情；悬停底色淡入而不是一帧变色 -->
+    <Style x:Key="MonthItemButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Padding" Value="4,1" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Border Background="{DynamicResource accent-weak}"
+                                CornerRadius="{StaticResource RadiusS}" />
+                        <Border x:Name="hoverBg" Background="{DynamicResource accent-weak-hover}"
+                                CornerRadius="{StaticResource RadiusS}" Opacity="0" />
+                        <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="hoverBg" Property="Opacity" Value="1" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.1" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.16" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="MonthCellButton" TargetType="Button">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource text-primary}" />
@@ -723,6 +942,11 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
+                            <!-- 悬停底色：负边距刚好铺满格子内部（不盖住 1px 分隔线），淡入而不是一帧变色 -->
+                            <Border x:Name="hoverBg" Grid.RowSpan="2"
+                                    Background="{DynamicResource bg-hover}"
+                                    Margin="-6,-4,-6,-4" Opacity="0" />
+
                             <TextBlock x:Name="dayText" Grid.Row="0" Text="{Binding Day}"
                                        FontSize="{StaticResource FontSize12}"
                                        Foreground="{TemplateBinding Foreground}"
@@ -742,14 +966,17 @@
                                     </ItemsControl.ItemContainerStyle>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Background="{DynamicResource accent-weak}"
-                                                    CornerRadius="{StaticResource RadiusS}"
-                                                    Padding="4,1" Margin="0,0,0,2">
+                                            <!-- 点日程条直接开这条任务的详情，不再只是把整格点成日视图 -->
+                                            <Button Style="{StaticResource MonthItemButton}"
+                                                    Margin="0,0,0,2"
+                                                    beh:ClickPop.Enabled="True"
+                                                    Command="{Binding DataContext.SelectTaskCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}">
                                                 <TextBlock Text="{Binding Title}"
                                                            FontSize="{StaticResource FontSize11}"
                                                            Foreground="{DynamicResource text-secondary}"
                                                            TextTrimming="CharacterEllipsis" />
-                                            </Border>
+                                            </Button>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
@@ -764,7 +991,25 @@
                                 <Condition Binding="{Binding IsSelected}" Value="False" />
                                 <Condition Binding="{Binding IsToday}" Value="False" />
                             </MultiDataTrigger.Conditions>
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                            <MultiDataTrigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.11" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiDataTrigger.EnterActions>
+                            <MultiDataTrigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiDataTrigger.ExitActions>
+                            <Setter TargetName="hoverBg" Property="Opacity" Value="1" />
                         </MultiDataTrigger>
                         <DataTrigger Binding="{Binding IsOtherMonth}" Value="True">
                             <Setter TargetName="dayText" Property="Foreground" Value="{DynamicResource text-tertiary}" />
@@ -798,8 +1043,14 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusPill}">
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="{StaticResource RadiusPill}"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform />
+                        </Border.RenderTransform>
                         <Grid>
+                            <Border x:Name="hoverBg" Background="{DynamicResource bg-hover}"
+                                    CornerRadius="{StaticResource RadiusPill}" Opacity="0" />
                             <TextBlock Text="{Binding Day}" FontSize="{TemplateBinding FontSize}"
                                        Foreground="{TemplateBinding Foreground}"
                                        FontWeight="{TemplateBinding FontWeight}"
@@ -817,10 +1068,63 @@
                                 <Condition Binding="{Binding IsSelected}" Value="False" />
                                 <Condition Binding="{Binding IsToday}" Value="False" />
                             </MultiDataTrigger.Conditions>
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource bg-hover}" />
+                            <MultiDataTrigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.1" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiDataTrigger.EnterActions>
+                            <MultiDataTrigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="hoverBg"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.16" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiDataTrigger.ExitActions>
+                            <Setter TargetName="hoverBg" Property="Opacity" Value="1" />
                         </MultiDataTrigger>
                         <DataTrigger Binding="{Binding HasTasks}" Value="True">
                             <Setter TargetName="Dot" Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                        <!-- 选中那天轻轻一压再弹回：点日期的手感落在这一下上 -->
+                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                            <DataTrigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="bd"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)">
+                                            <EasingDoubleKeyFrame KeyTime="0:0:0.07" Value="0.86">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <QuadraticEase EasingMode="EaseOut" />
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                            <EasingDoubleKeyFrame KeyTime="0:0:0.26" Value="1">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <BackEase Amplitude="0.4" EasingMode="EaseOut" />
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="bd"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
+                                            <EasingDoubleKeyFrame KeyTime="0:0:0.07" Value="0.86">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <QuadraticEase EasingMode="EaseOut" />
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                            <EasingDoubleKeyFrame KeyTime="0:0:0.26" Value="1">
+                                                <EasingDoubleKeyFrame.EasingFunction>
+                                                    <BackEase Amplitude="0.4" EasingMode="EaseOut" />
+                                                </EasingDoubleKeyFrame.EasingFunction>
+                                            </EasingDoubleKeyFrame>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.EnterActions>
                         </DataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -845,6 +1149,7 @@
     <!-- ================= 月视图左列的「展 / 收」 ================= -->
 
     <Style x:Key="WeekToggleButton" TargetType="Button">
+        <Setter Property="beh:ClickPop.Enabled" Value="True" />
         <Setter Property="Width" Value="{StaticResource MonthToggleWidth}" />
         <Setter Property="Height" Value="22" />
         <Setter Property="Background" Value="Transparent" />

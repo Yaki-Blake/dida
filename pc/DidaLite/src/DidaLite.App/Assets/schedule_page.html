@@ -43,10 +43,6 @@
   button:hover, select:hover { background: #f8fafc; }
   button.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
   button.primary:hover { background: #1d4ed8; }
-  .tabs { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
-  .tabs button { border: 0; border-radius: 0; padding: 6px 13px; }
-  .tabs button.on { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
-
   .content { padding: 18px 22px 26px; overflow: auto; }
   .summary { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink-2); font-size: 13px; margin-bottom: 14px; }
   .summary b { color: var(--ink); font-weight: 650; }
@@ -73,22 +69,6 @@
   .card .n { font-weight: 650; font-size: 12.5px; display: block; }
   .card .r { color: var(--ink-2); display: block; margin-top: 2px; }
   .card .t { color: var(--ink-3); font-size: 11px; display: block; margin-top: 2px; }
-
-  /* ---- 日视图 ---- */
-  .daywrap { max-width: 720px; }
-  .days { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
-  .days button.on { background: var(--brand); color: #fff; border-color: var(--brand); }
-  .timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 8px 16px 16px; }
-  .item { display: grid; grid-template-columns: 108px 1fr; gap: 14px; padding: 13px 0;
-          border-bottom: 1px solid var(--line-soft); }
-  .item:last-child { border-bottom: 0; }
-  .time { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 3px; }
-  .time b { display: block; color: var(--ink); font-size: 15px; }
-  .bar { border-left: 3px solid var(--c, #94a3b8); border-radius: 6px;
-         background: var(--bg-soft, #f1f5f9); padding: 9px 12px; }
-  .bar .n { font-weight: 650; }
-  .bar .m { color: var(--ink-2); font-size: 12px; margin-top: 3px; }
-  .empty { color: var(--ink-3); padding: 28px 4px; text-align: center; }
 
   /* ---- 接口契约 ---- */
   details { margin-top: 22px; background: var(--panel); border: 1px solid var(--line);
@@ -128,10 +108,6 @@
         <button id="next">下周 ›</button>
         <button id="thisWeek">本周</button>
       </div>
-      <div class="tabs">
-        <button id="tabWeek" class="on">周视图</button>
-        <button id="tabDay">日视图</button>
-      </div>
     </header>
 
     <div class="content">
@@ -166,7 +142,7 @@
 <script>
 (function () {
   'use strict';
-  var S = { events: [], week: 11, view: 'week', day: 1, today: '', week1: '2026-09-07',
+  var S = { events: [], week: 11, today: '', week1: '2026-09-07',
             total: 0, src: '', mode: '实时接口' };
 
   function esc(s) {
@@ -243,35 +219,7 @@
     document.getElementById('view').innerHTML = html;
   }
 
-  function renderDay() {
-    var mon = weekMonday(S.week);
-    var weekEvents = S.events.filter(function (e) { return e.week === S.week; });
-    renderSummary(weekEvents);
-    var iso = addDays(mon, S.day - 1);
-    var list = weekEvents.filter(function (e) { return e.weekday === S.day; });
-    var html = '<div class="daywrap"><div class="days">';
-    for (var d = 1; d <= 7; d++) {
-      html += '<button data-day="' + d + '" class="' + (d === S.day ? 'on' : '') + '">周' + WD[d - 1] +
-              ' <span style="opacity:.65;font-size:11px">' + addDays(mon, d - 1).slice(5) + '</span></button>';
-    }
-    html += '</div><div class="timeline">';
-    if (!list.length) html += '<div class="empty">这一天没有课</div>';
-    list.forEach(function (e) {
-      html += '<div class="item"><div class="time"><b>' + esc(e.start) + '</b>' + esc(e.end) +
-              ' · ' + esc(e.period) + ' 节</div>' +
-              '<div class="bar" style="' + colorOf(e.name) + '">' +
-              '<div class="n">' + esc(e.name) + '</div>' +
-              '<div class="m">' + esc(e.room) + (e.teacher ? ' · ' + esc(e.teacher) : '') +
-              ' · 第 ' + e.week + ' 教学周 · 周次 ' + esc(e.weeksExpr) + '</div></div></div>';
-    });
-    html += '</div></div>';
-    document.getElementById('view').innerHTML = html;
-    Array.prototype.forEach.call(document.querySelectorAll('[data-day]'), function (b) {
-      b.onclick = function () { S.day = +b.dataset.day; renderDay(); };
-    });
-  }
-
-  function render() { S.view === 'week' ? renderWeek() : renderDay(); }
+  function render() { renderWeek(); }
 
   function initControls() {
     var sel = document.getElementById('weekSel');
@@ -285,12 +233,6 @@
     document.getElementById('prev').onclick = function () { S.week = Math.max(1, S.week - 1); sel.value = S.week; render(); };
     document.getElementById('next').onclick = function () { S.week = Math.min(20, S.week + 1); sel.value = S.week; render(); };
     document.getElementById('thisWeek').onclick = function () { S.week = currentWeek().week; sel.value = S.week; render(); };
-    document.getElementById('tabWeek').onclick = function () {
-      S.view = 'week'; this.classList.add('on'); document.getElementById('tabDay').classList.remove('on'); render();
-    };
-    document.getElementById('tabDay').onclick = function () {
-      S.view = 'day'; this.classList.add('on'); document.getElementById('tabWeek').classList.remove('on'); render();
-    };
     Array.prototype.forEach.call(document.querySelectorAll('.seg'), function (el) {
       if (el.dataset.seg === 'schedule') return;
       el.onclick = function () {
@@ -323,7 +265,6 @@
     var cw = currentWeek();
     S.today = cw.today;
     S.week = Math.min(20, Math.max(1, cw.week));
-    S.day = ((new Date(Date.now() + 8 * 3600000).getUTCDay() + 6) % 7) + 1;
     document.getElementById('term').textContent = data.term + ' · 第 1 周周一 ' + S.week1 + subtitle;
     document.getElementById('src').textContent = S.src + (mode === '离线快照' ? '（schedule_data.js）' : '');
     initControls();

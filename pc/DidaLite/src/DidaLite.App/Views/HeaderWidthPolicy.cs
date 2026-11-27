@@ -2,14 +2,14 @@ namespace DidaLite.App.Views;
 
 /// <summary>
 /// 侧栏与主区的宽度分配规则（纯计算，便于单独验证）。
-/// 原则：侧栏宽度优先。主区放不下完整头部时，先让副标题走省略号，绝不反过来把侧栏按到最窄。
+/// 原则：侧栏宽度优先。主区放不下完整头部时压缩主区，绝不反过来把侧栏按到最窄。
 /// </summary>
 public static class HeaderWidthPolicy
 {
     /// <summary>主区绝对下限：再窄界面就没法用了。</summary>
     public const double MainFloor = 300;
 
-    /// <summary>头部可以被压到的宽度：到了这里副标题基本只剩省略号。</summary>
+    /// <summary>头部可以被压到的宽度：标题与按钮组仍要完整放下。</summary>
     public const double HeaderTrimFloor = 460;
 
     /// <summary>

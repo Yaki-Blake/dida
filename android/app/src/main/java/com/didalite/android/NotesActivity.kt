@@ -33,6 +33,9 @@ class NotesActivity : Activity() {
 
     private lateinit var db: Db
 
+    /** 正在同步：防止连点重复推拉。 */
+    private var syncing = false
+
     private var editing: Note? = null
 
     /** 多选状态：长按任意一条进入，列表重建时靠 id 保留勾选。 */
@@ -110,17 +113,15 @@ class NotesActivity : Activity() {
 
         column.addView(if (selectMode) selectHeader() else normalHeader())
 
-        column.addView(TextView(this).apply {
-            text = if (selectMode) {
-                "勾选后点「分享」导出，或「删除」清掉"
-            } else {
-                "手机与电脑共享；长按条目可多选，批量分享"
-            }
-            textSize = 12f
-            typeface = Ui.body
-            setTextColor(Ui.MUTED)
-            setPadding(0, dpx(8), 0, 0)
-        })
+        if (selectMode) {
+            column.addView(TextView(this).apply {
+                text = "勾选后点「分享」导出，或「删除」清掉"
+                textSize = 12f
+                typeface = Ui.body
+                setTextColor(Ui.MUTED)
+                setPadding(0, dpx(8), 0, 0)
+            })
+        }
 
         // 全选 / 删除 贴在顶部，条目多的时候不用滚到底
         if (selectMode) column.addView(selectActions(), topGap(12))
@@ -146,7 +147,7 @@ class NotesActivity : Activity() {
             setBackgroundColor(Ui.PAPER)
             addView(column)
         }
-        setContentView(scroll)
+        setContentView(NavBar.wrap(this, scroll, NavBar.NOTES))
     }
 
     private fun normalHeader(): View {
@@ -154,24 +155,42 @@ class NotesActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        titleRow.addView(pill("‹ 滴答", small = true).apply {
-            setOnClickListener { finish() }
-        })
-        titleRow.addView(TextView(this).apply {
-            text = "便签"
-            textSize = 22f
-            typeface = Ui.display
-            setTextColor(Ui.INK)
-            gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        titleRow.addView(pill("+ 新建", primary = true, small = true).apply {
+        titleRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        titleRow.addView(pill("+ 新建", small = true).apply {
             setOnClickListener {
                 val note = Note.create()
                 db.saveNote(note)
                 showEditor(note)
             }
-        })
+        }, gapParams(start = 6))
+        // 「同步」统一放最右、统一用绿色主色：三个页面里只有它是主操作，
+        // 其余按钮一律白底，一眼就能看出该点哪个
+        titleRow.addView(pill("同步", primary = true, small = true).apply {
+            setOnClickListener { doSync() }
+        }, gapParams(start = 6))
         return titleRow
+    }
+
+    /** 右上角最右端的「同步」：不区分页面，一把推拉全部数据。 */
+    private fun doSync() {
+        if (syncing) return
+        syncing = true
+        toast("同步中…")
+        Thread {
+            val message = try {
+                SyncEngine.run(applicationContext, db)
+            } catch (e: ApiException) {
+                if (e.code == 401) db.setMeta("token", null)
+                "同步失败：" + (e.message ?: "HTTP ${e.code}")
+            } catch (e: Exception) {
+                "同步失败：" + (e.message ?: e.javaClass.simpleName)
+            }
+            runOnUiThread {
+                syncing = false
+                toast(message)
+                showList()
+            }
+        }.start()
     }
 
     private fun selectHeader(): View {

@@ -12,19 +12,14 @@
         <!-- 图例：颜色对应每天的日程数，0 项留白 -->
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" HorizontalAlignment="Right"
                     Margin="16,10,16,0">
-            <TextBlock Text="每天日程数" Style="{StaticResource MetaText}" Margin="0,0,10,0" />
-            <Ellipse Width="9" Height="9" VerticalAlignment="Center"
-                     Fill="{DynamicResource heat-green}" Margin="0,0,4,0" />
-            <TextBlock Text="1-2" Style="{StaticResource HintText}" Margin="0,0,10,0" />
-            <Ellipse Width="9" Height="9" VerticalAlignment="Center"
-                     Fill="{DynamicResource heat-yellow}" Margin="0,0,4,0" />
-            <TextBlock Text="3-6" Style="{StaticResource HintText}" Margin="0,0,10,0" />
-            <Ellipse Width="9" Height="9" VerticalAlignment="Center"
-                     Fill="{DynamicResource heat-purple}" Margin="0,0,4,0" />
-            <TextBlock Text="7-10" Style="{StaticResource HintText}" Margin="0,0,10,0" />
-            <Ellipse Width="9" Height="9" VerticalAlignment="Center"
-                     Fill="{DynamicResource heat-red}" Margin="0,0,4,0" />
-            <TextBlock Text="11+" Style="{StaticResource HintText}" />
+            <Ellipse Width="11" Height="11" VerticalAlignment="Center"
+                     Fill="{DynamicResource heat-green}" Margin="0,0,8,0" ToolTip="1–2 项" />
+            <Ellipse Width="11" Height="11" VerticalAlignment="Center"
+                     Fill="{DynamicResource heat-yellow}" Margin="0,0,8,0" ToolTip="3–6 项" />
+            <Ellipse Width="11" Height="11" VerticalAlignment="Center"
+                     Fill="{DynamicResource heat-purple}" Margin="0,0,8,0" ToolTip="7–10 项" />
+            <Ellipse Width="11" Height="11" VerticalAlignment="Center"
+                     Fill="{DynamicResource heat-red}" ToolTip="11 项以上" />
         </StackPanel>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto"

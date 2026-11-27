@@ -60,8 +60,9 @@ public sealed class DayCourseBlockViewModel
     /// <summary>再高一点才放得下教室。</summary>
     public bool ShowRoom => Height >= 60 && RoomText.Length > 0;
 
-    /// <summary>四行全放得下才把老师单独列出来，免得被裁掉半截。</summary>
-    public bool ShowTeacher => Height >= 78 && TeacherText.Length > 0;
+    /// <summary>老师单独一行。一节课按 90 分钟算约 72px，门槛必须低于它，
+    /// 配合 MainWindow 里压紧的 padding / margin，四行都能塞进课程带。</summary>
+    public bool ShowTeacher => Height >= 60 && TeacherText.Length > 0;
 
     /// <summary>悬停提示：一屏里有的东西都在，不用点进去也能看全。</summary>
     public string Tooltip

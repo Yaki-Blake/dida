@@ -18,11 +18,9 @@
             Margin="12"
             Effect="{DynamicResource OverlayShadow}">
         <StackPanel Margin="16">
-            <TextBlock Text="提醒" Style="{StaticResource HintText}" />
             <TextBlock x:Name="TitleText"
                        Style="{StaticResource SectionTitle}"
-                       TextWrapping="Wrap"
-                       Margin="0,6,0,0" />
+                       TextWrapping="Wrap" />
             <TextBlock x:Name="DueText"
                        Style="{StaticResource MetaText}"
                        Margin="0,6,0,0" />

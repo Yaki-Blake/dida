@@ -21,3 +21,13 @@ build/
 # 本地测试脚本（含口令）与备份文件
 pc/DidaLite/dist/
 *.bak-*
+
+# 本地打包/推送辅助脚本与临时文件，不进 GitHub
+assemble-packages.py
+build-packages.ps1
+pack-update.py
+push_*.py
+sync_source.py
+release-notes*.md
+*_wpftmp.csproj
+*.tmp

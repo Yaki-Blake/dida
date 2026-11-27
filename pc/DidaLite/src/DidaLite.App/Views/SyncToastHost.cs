@@ -217,7 +217,6 @@ internal sealed class SyncToastHost
             CornerRadius = new CornerRadius(CardRadius),
             Child = layout,
             Cursor = Cursors.Hand,
-            ToolTip = "单击关闭",
             RenderTransform = new TransformGroup { Children = { offset, slide, rise } },
         };
         root.SetResourceReference(Border.BackgroundProperty, "accent");

@@ -35,6 +35,9 @@ class AlarmActivity : Activity() {
     private var selectMode = false
     private val selected = mutableSetOf<String>()
 
+    /** 正在同步：防止连点重复推拉。 */
+    private var syncing = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         db = Db(this)
@@ -56,19 +59,15 @@ class AlarmActivity : Activity() {
         }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), statusBarHeight() + dp(10), dp(20), dp(28))
+            // 底栏上提 BAR_LIFT_DP，内容底部多让出这段高度，最后一条不被盖住
+            setPadding(dp(20), statusBarHeight() + dp(10), dp(20), dp(28 + NavBar.BAR_LIFT_DP))
         }
 
         val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        titleRow.addView(TextView(this).apply {
-            text = "闹钟"
-            textSize = 22f
-            typeface = Ui.display
-            setTextColor(Ui.INK)
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        titleRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         batchToggle = pill("批量", small = true).apply {
             setOnClickListener {
                 selectMode = !selectMode
@@ -80,16 +79,12 @@ class AlarmActivity : Activity() {
         titleRow.addView(pill("打开时钟", small = true).apply {
             setOnClickListener { openClockApp() }
         }, gapParams(start = 6))
+        // 「同步」统一放最右、统一用绿色主色：三个页面里只有它是主操作，
+        // 其余按钮一律白底，一眼就能看出该点哪个
+        titleRow.addView(pill("同步", primary = true, small = true).apply {
+            setOnClickListener { doSync() }
+        }, gapParams(start = 6))
         column.addView(titleRow)
-
-        column.addView(TextView(this).apply {
-            text = "只显示电脑端「闹钟」里的闹钟。停用、删除会在下次同步时一起改到电脑上；「写入」把时分和名称预填进系统时钟。"
-            textSize = 12f
-            typeface = Ui.body
-            setTextColor(Ui.MUTED)
-            setLineSpacing(dp(3).toFloat(), 1f)
-            setPadding(0, dp(10), 0, 0)
-        })
 
         emptyView = TextView(this).apply {
             text = "电脑上还没有闹钟\n同步一次就会出现在这里"
@@ -129,7 +124,38 @@ class AlarmActivity : Activity() {
         scroll.addView(column)
         root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(batchBar)
+        // 底栏固定为 BAR_HEIGHT_DP，与其它页一致：之前直接 addView 没给高度，
+        // 底栏被内容撑成 57dp，比课表页的 62dp 矮，切到这一页时导航栏上界会下降。
+        root.addView(NavBar.bar(this, NavBar.TIME), LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(NavBar.BAR_HEIGHT_DP)
+        ))
+        // 底栏上提 BAR_LIFT_DP：在底栏下方垫一条同色空白，与其它页保持一致
+        root.addView(View(this).apply { setBackgroundColor(Ui.PAPER) }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(NavBar.BAR_LIFT_DP)
+        ))
         return root
+    }
+
+    /** 右上角最右端的「同步」：不区分页面，一把推拉全部数据。 */
+    private fun doSync() {
+        if (syncing) return
+        syncing = true
+        Toast.makeText(this, "同步中…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val message = try {
+                SyncEngine.run(applicationContext, db)
+            } catch (e: ApiException) {
+                if (e.code == 401) db.setMeta("token", null)
+                "同步失败：" + (e.message ?: "HTTP ${e.code}")
+            } catch (e: Exception) {
+                "同步失败：" + (e.message ?: e.javaClass.simpleName)
+            }
+            runOnUiThread {
+                syncing = false
+                Toast.makeText(this@AlarmActivity, message, Toast.LENGTH_SHORT).show()
+                render()
+            }
+        }.start()
     }
 
     private fun batchAction(label: String, color: Int = Ui.INK, action: () -> Unit) =

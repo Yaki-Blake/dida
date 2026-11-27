@@ -22,7 +22,7 @@
   -->
   <Package Name="滴答"
            Manufacturer="DidaLite"
-           Version="0.4.1"
+           Version="0.4.2"
            Language="2052"
            Codepage="936"
            Scope="perUser"

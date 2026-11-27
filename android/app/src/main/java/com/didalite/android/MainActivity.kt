@@ -1,7 +1,9 @@
 package com.didalite.android
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -11,8 +13,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 
 /**
- * 手机端只做同步面板：仅上传 / 仅下载 / 同步 / 设置，
- * 下面列出这一次具体新上传了哪些、新下载了哪些。
+ * 手机端同步面板：右上角「同步」，下面列出这一次具体新上传了哪些、新下载了哪些。
  * 界面全部用原生 View，零第三方依赖。
  */
 class MainActivity : Activity() {
@@ -75,6 +76,8 @@ class MainActivity : Activity() {
         titleRow.addView(pill("设置", small = true).apply {
             setOnClickListener { openSettings() }
         }, gapParams(start = 6))
+        // 「同步」固定在标题行最右端：与便签页、闹钟页保持一致
+        titleRow.addView(actionButton("同步", primary = true, small = true) { doSync() }, gapParams(start = 6))
         column.addView(titleRow)
 
         statusView = TextView(this).apply {
@@ -106,15 +109,6 @@ class MainActivity : Activity() {
         }
         column.addView(permHint)
 
-        val actionRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(20), 0, 0)
-        }
-        actionRow.addView(actionButton("仅上传") { doUpload() }, gapParams(weight = 1f))
-        actionRow.addView(actionButton("仅下载") { doDownload() }, gapParams(weight = 1f, start = 8))
-        actionRow.addView(actionButton("同步", primary = true) { doSync() }, gapParams(weight = 1f, start = 8))
-        column.addView(actionRow)
-
         column.addView(pageRule(topMargin = 28))
 
         val resultHead = LinearLayout(this).apply {
@@ -137,7 +131,7 @@ class MainActivity : Activity() {
         column.addView(resultHead)
 
         summaryView = TextView(this).apply {
-            text = "点「同步」，两边的改动会合到一起"
+            text = "点右上角「同步」，两边的改动会合到一起"
             textSize = 14f
             typeface = Ui.body
             setTextColor(Ui.MUTED)
@@ -163,8 +157,8 @@ class MainActivity : Activity() {
         return root
     }
 
-    private fun actionButton(label: String, primary: Boolean = false, action: () -> Unit) =
-        pill(label, primary).apply {
+    private fun actionButton(label: String, primary: Boolean = false, small: Boolean = false, action: () -> Unit) =
+        pill(label, primary, small).apply {
             setOnClickListener { action() }
             actionButtons.add(this)
         }
@@ -206,105 +200,13 @@ class MainActivity : Activity() {
 
     // ---------- 动作 ----------
 
-    private fun doUpload() {
-        val (base, token) = session() ?: return
-        runAsync("上传中") {
-            // 先看日历：手机里删掉的事件要变成墓碑，才能跟着这一轮推给电脑端
-            val cal = CalendarSync.scan(applicationContext, db)
-            // 全量快照：每次都把本地整份日历（含墓碑）推上去，由服务器逐条按修改时间合并。
-            // 不再依赖 dirty 标记——漏标脏的条目也能上传，杜绝「有任务传不过去」。
-            val dirty = db.allIncludingDeleted()
-            val alarmOps = db.alarmOps()
-            val dirtyNotes = db.allNotesIncludingDeleted()
-
-            val sentAt = dirty.associate { it.id to it.updatedAt }
-            val sentRev = dirty.associate { it.id to it.rev }
-            val sentNoteAt = dirtyNotes.associate { it.id to it.updatedAt }
-            // since / note_since 取极大值：服务端只回 accepted，不把它的整份日历灌回来，
-            // 保证「仅上传」不顺带改本地。
-            val payload = Api.push(
-                base, token, Long.MAX_VALUE / 4, dirty, alarmOps,
-                notes = dirtyNotes, noteSince = Long.MAX_VALUE / 4,
-            )
-            payload.accepted.forEach { (id, rev) -> db.markSynced(id, rev, sentAt[id]) }
-            payload.noteAccepted.forEach { (id, rev) -> db.markNoteSynced(id, rev, sentNoteAt[id]) }
-            payload.rejected.forEach { db.applyServer(it) }
-            db.clearAlarmOps()
-
-            val uploaded = uploadedCount(payload.accepted, sentRev)
-            val changedIds = payload.accepted.filter { (id, rev) -> sentRev[id] != rev }.map { it.first }.toSet()
-            val rows = mutableListOf<ChangeRow>()
-            dirty.filter { it.id in changedIds }
-                .forEach { rows.add(ChangeRow("↑", it.title, Ui.ACCENT_DEEP)) }
-            payload.rejected.forEach { rows.add(ChangeRow("↺", it.title, Ui.WARN)) }
-            if (alarmOps.isNotEmpty()) {
-                rows.add(ChangeRow("↑", "闹钟改动 ${alarmOps.size} 个", Ui.ACCENT_DEEP))
-            }
-            if (dirtyNotes.isNotEmpty()) {
-                rows.add(ChangeRow("↑", "便签 ${payload.noteAccepted.size} 条", Ui.ACCENT_DEEP))
-            }
-            // 日历里删掉的日程：本地已打墓碑，这一轮推给电脑端
-            cal.titles.forEach { rows.add(ChangeRow("×", it, Ui.MUTED)) }
-
-            ReminderScheduler.rescheduleAll(applicationContext)
-            val alarmNote = if (alarmOps.isEmpty()) "" else "，闹钟改动 ${alarmOps.size} 个"
-            val noteNote = if (dirtyNotes.isEmpty()) "" else "，便签 ${payload.noteAccepted.size} 条"
-            val calNote = if (cal.removed > 0) "，日历删除 ${cal.removed} 条" else ""
-            Outcome(
-                "上传任务 $uploaded 条$calNote$alarmNote$noteNote，被拒 ${payload.rejected.size} 条（已改用电脑版本）",
-                rows,
-            )
-        }
-    }
-
-    private fun doDownload() {
-        val (base, token) = session() ?: return
-        runAsync("下载中") {
-            // 日历里删掉的日程先打上墓碑，「仅下载」不外传，等下一轮上传时推给电脑端
-            val cal = CalendarSync.scan(applicationContext, db)
-            val beforeAlarms = db.alarms()
-            val beforeTasks = db.allIncludingDeleted().associate { it.id to it.updatedAt }
-            val beforeNotes = db.notes().associate { it.id to it.updatedAt }
-            val payload = Api.pull(base, token, db.cursor(), db.noteCursor())
-            payload.tasks.forEach { db.applyServer(it) }
-            db.setCursor(payload.maxRev)
-            db.replaceAlarms(payload.alarms)
-            payload.notes.forEach { db.applyServerNote(it) }
-            if (payload.noteMaxRev > 0) db.setNoteCursor(payload.noteMaxRev)
-
-            val noteChanges = changedCount(beforeNotes, db.notes().associate { it.id to it.updatedAt })
-            val changedIds = changedTaskIds(beforeTasks, payload.tasks)
-            val changedTasks = payload.tasks.filter { it.id in changedIds }
-
-            val rows = changedTasks.mapTo(mutableListOf()) { task ->
-                if (task.deleted) {
-                    ChangeRow("×", task.title, Ui.MUTED)
-                } else {
-                    ChangeRow("↓", task.title, Ui.INK_2)
-                }
-            }
-            if (beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }) {
-                rows.add(ChangeRow("↓", "闹钟 ${payload.alarms.size} 个", Ui.INK_2))
-            }
-            if (noteChanges > 0) {
-                rows.add(ChangeRow("↓", "便签 $noteChanges 条", Ui.INK_2))
-            }
-            cal.titles.forEach { rows.add(ChangeRow("×", it, Ui.MUTED)) }
-            ReminderScheduler.rescheduleAll(applicationContext)
-            writeCalendarQuietly()
-            val alarmChanged = beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }
-            Outcome(
-                summaryForDownload(changedTasks, alarmChanged, payload.alarms.size, noteChanges) +
-                    if (cal.removed > 0) "，日历删除 ${cal.removed} 条待上传" else "",
-                rows,
-            )
-        }
-    }
-
     private fun doSync() {
         val (base, token) = session() ?: return
         runAsync("同步中") {
-            // 先扫日历：手机里删掉的事件变成墓碑，才能跟着这一轮推给电脑端，电脑端那边也就消失了
+            // 先把系统日历里新写/改过的事件导入成本地任务（标脏），这一轮的全量快照才带得上去；
+            // 没有读取权限或读失败就安静跳过，不拦同步
+            val imported = importCalendarQuietly()
+            // 再扫日历：手机里删掉的事件变成墓碑，才能跟着这一轮推给电脑端，电脑端那边也就消失了
             val cal = CalendarSync.scan(applicationContext, db)
             // 全量快照：整份上传本地日历，服务器按修改时间合并，不依赖 dirty 标记。
             val dirty = db.allIncludingDeleted()
@@ -369,6 +271,7 @@ class MainActivity : Activity() {
             // 闹钟 / 便签 / 任务是三条独立通道：任务的 0 条不代表另外两条没同步，摘要里分开写清楚
             val alarmChanged = beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }
             val sb = StringBuilder("上传任务 $uploaded 条，下载任务 ${downloadedTasks.size} 条")
+            if (imported > 0) sb.append("，日历导入 $imported 条")
             if (deleted > 0) sb.append("（含删除 $deleted 条）")
             if (cal.removed > 0) sb.append("，日历删除 ${cal.removed} 条")
             if (alarmOps.isNotEmpty()) sb.append("，闹钟改动 ${alarmOps.size} 个")
@@ -378,7 +281,7 @@ class MainActivity : Activity() {
             }
             val noChange = uploaded == 0 && downloadedTasks.isEmpty() &&
                 alarmOps.isEmpty() && !alarmChanged && payload.rejected.isEmpty() &&
-                dirtyNotes.isEmpty() && noteChanges == 0 && cal.removed == 0
+                dirtyNotes.isEmpty() && noteChanges == 0 && cal.removed == 0 && imported == 0
             Outcome(if (noChange) "已是最新，没有变化" else sb.toString(), rows)
         }
     }
@@ -395,27 +298,25 @@ class MainActivity : Activity() {
     private fun changedTaskIds(before: Map<String, Long>, tasks: List<Task>): Set<String> =
         tasks.filter { before[it.id] != it.updatedAt }.map { it.id }.toSet()
 
+    /**
+     * 同步前静默导入系统日历：刚在手机日历里写的日程先变成本地任务（标脏），
+     * 才能跟着这一轮的全量快照推上云端。没授权、读不到就安静跳过，不拦同步。
+     * 返回这一轮新导入/更新的条数。
+     */
+    private fun importCalendarQuietly(): Int {
+        if (checkSelfPermission(Manifest.permission.READ_CALENDAR)
+            != PackageManager.PERMISSION_GRANTED) return 0
+        return try {
+            SystemCalendar.importInto(db, SystemCalendar.read(this))
+        } catch (e: Exception) {
+            0
+        }
+    }
+
     /** 同步完顺手把任务写进系统日历；没授权或没有可写日历就安静跳过。 */
     private fun writeCalendarQuietly() {
         if (!CalendarWriter.hasPermission(this)) return
         runCatching { CalendarWriter.sync(applicationContext, db) }
-    }
-
-    private fun summaryForDownload(
-        tasks: List<Task>,
-        alarmChanged: Boolean,
-        alarmCount: Int,
-        noteChanges: Int,
-    ): String {
-        val deleted = tasks.count { it.deleted }
-        if (tasks.isEmpty() && !alarmChanged && noteChanges == 0) return "电脑上没有新改动"
-        val parts = mutableListOf<String>()
-        if (tasks.isNotEmpty()) {
-            parts += "下载任务 ${tasks.size} 条" + if (deleted > 0) "（含删除 $deleted 条）" else ""
-        }
-        if (alarmChanged) parts += "闹钟 $alarmCount 个"
-        if (noteChanges > 0) parts += "便签 $noteChanges 条"
-        return parts.joinToString("，")
     }
 
     private fun session(): Pair<String, String>? {
