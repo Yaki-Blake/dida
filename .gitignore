@@ -26,6 +26,7 @@ pc/DidaLite/dist/
 assemble-packages.py
 build-packages.ps1
 pack-update.py
+crop_preview.py
 push_*.py
 sync_source.py
 release-notes*.md

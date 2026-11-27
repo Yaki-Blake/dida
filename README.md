@@ -2,6 +2,20 @@
 
 电脑端（Windows / WPF）+ 手机端（Android）双端日程软件：待办、便签、闹钟、课表一处管理，两端自动同步。提醒在设备本地排程，断网也会准时响。
 
+## 界面预览
+
+手机端五个页面（纸感主题、底部导航固定）：
+
+| 课表 | 学业 | 时间 |
+| :---: | :---: | :---: |
+| ![课表](docs/design/shots/readme/preview-schedule.png) | ![学业](docs/design/shots/readme/preview-study.png) | ![时间](docs/design/shots/readme/preview-time.png) |
+
+| 便签 | 设置 |
+| :---: | :---: |
+| ![便签](docs/design/shots/readme/preview-notes.png) | ![设置](docs/design/shots/readme/preview-settings.png) |
+
+> 课表支持固定色块 + 上下滑动，教室与教师完整显示；底栏可在五个页面间切换。
+
 ## 快速上手
 
 ### 1. 下载安装
@@ -11,7 +25,7 @@
 | 文件 | 装在哪 | 说明 |
 | --- | --- | --- |
 | `dida.msi` | Windows | **推荐**。双击安装（约 62 MB，自带 .NET 运行时，什么环境都能跑），装完在系统托盘运行 |
-| `dida-0.4.1.zip` | Windows | **精简版（仅 2 MB）**。功能与 MSI 完全一样，但是打包时不带 .NET ——运行的话**要求电脑已装 .NET 10  + ASP.NET Core **（没装的话可以去 [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0) 下载安装，懒得折腾的可以直接下msi）。解压后双击 `dida.exe` 直接用，不写注册表，删掉目录即卸载 |
+| `dida-0.4.2.zip` | Windows | **精简版（仅 2 MB）**。功能与 MSI 完全一样，但是打包时不带 .NET ——运行的话**要求电脑已装 .NET 10  + ASP.NET Core **（没装的话可以去 [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0) 下载安装，懒得折腾的可以直接下msi）。解压后双击 `dida.exe` 直接用，不写注册表，删掉目录即卸载 |
 | `dida.apk` | Android | 直接安装 |
 | `dida-uninstall.cmd` | Windows | 卸载后清理残留注册信息，右键「以管理员身份运行」；加 `-CheckOnly` 参数只查看不动 |
 
