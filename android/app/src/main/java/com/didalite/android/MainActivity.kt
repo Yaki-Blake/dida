@@ -247,7 +247,8 @@ class MainActivity : Activity() {
             if (alarmOps.isNotEmpty()) {
                 rows.add(ChangeRow("↑", "闹钟改动 ${alarmOps.size} 个", Ui.ACCENT_DEEP))
             }
-            if (dirtyNotes.isNotEmpty()) {
+            // dirtyNotes 是「全量便签快照」，恒非空——拿它判断会每次都多出一行「便签 0 条」
+            if (noteUploaded > 0) {
                 rows.add(ChangeRow("↑", "便签 $noteUploaded 条", Ui.ACCENT_DEEP))
             }
             payload.rejected.forEach { rows.add(ChangeRow("↺", it.title, Ui.WARN)) }
@@ -271,19 +272,30 @@ class MainActivity : Activity() {
             val deleted = downloadedTasks.count { it.deleted }
             // 闹钟 / 便签 / 任务是三条独立通道：任务的 0 条不代表另外两条没同步，摘要里分开写清楚
             val alarmChanged = beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }
-            val sb = StringBuilder("上传任务 $uploaded 条，下载任务 ${downloadedTasks.size} 条")
+            // 服务端回的是**全量快照**（它不看 since），payload.tasks 恒等于云端总数；
+            // 直接拿它的 size 当「下载条数」，每条同步都会报「下载 146 条」，
+            // 用户会以为在反复重复下载。downloadedTasks 已按 updated_at 变没变筛过，只算它。
+            val downloaded = downloadedTasks.size
+            val sb = StringBuilder("上传任务 $uploaded 条，下载任务 $downloaded 条")
             if (imported > 0) sb.append("，日历导入 $imported 条")
             if (deleted > 0) sb.append("（含删除 $deleted 条）")
             if (cal.removed > 0) sb.append("，日历删除 ${cal.removed} 条")
             if (alarmOps.isNotEmpty()) sb.append("，闹钟改动 ${alarmOps.size} 个")
             if (alarmChanged) sb.append("，闹钟 ${payload.alarms.size} 个")
-            if (dirtyNotes.isNotEmpty() || noteChanges > 0) {
+            // dirtyNotes 是「全量便签快照」，恒非空——拿它判断会每次都多报「便签 上传 0 / 下载 0 条」
+            val noteTouched = noteUploaded > 0 || noteChanges > 0
+            if (noteTouched) {
                 sb.append("，便签 上传 $noteUploaded / 下载 $noteChanges 条")
             }
             val noChange = uploaded == 0 && downloadedTasks.isEmpty() &&
                 alarmOps.isEmpty() && !alarmChanged && payload.rejected.isEmpty() &&
-                dirtyNotes.isEmpty() && noteChanges == 0 && cal.removed == 0 && imported == 0
-            Outcome(if (noChange) "已是最新，没有变化" else sb.toString(), rows)
+                !noteTouched && cal.removed == 0 && imported == 0
+            // 日历权限没给时导入被静默跳过：不说明白，用户只会看到「没有变化」，
+            // 以为同步坏了——本次报障就是这个症状。
+            val hint = if (checkSelfPermission(Manifest.permission.READ_CALENDAR)
+                != PackageManager.PERMISSION_GRANTED
+            ) "\n没有「日历」权限，读不到手机日历里的日程。去「设置 → 系统日历」授权后再同步。" else ""
+            Outcome((if (noChange) "已是最新，没有变化" else sb.toString()) + hint, rows)
         }
     }
 

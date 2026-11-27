@@ -38,6 +38,7 @@ class SettingsActivity : Activity() {
     private lateinit var batteryState: TextView
     private lateinit var fullScreenState: TextView
     private lateinit var calendarState: TextView
+    private lateinit var calendarReadState: TextView
     private val permButtons = HashMap<TextView, TextView>()
 
     /** 从首页因「登录失效」跳进来：账号已保留，只需要补密码。 */
@@ -143,6 +144,9 @@ class SettingsActivity : Activity() {
         root.addView(pageRule(topMargin = 20))
 
         root.addView(label("系统日历"))
+        // 读和写是两枚权限：只给写不给读时同步能写回日历、却读不到用户新建的日程，
+        // 症状正是「日历里明明有日程，云端却没有」。两行分开显示，缺哪个一眼能看到。
+        calendarReadState = permissionRow(root, "读取日历", "去开启") { readCalendar() }
         calendarState = permissionRow(root, "写入日历", "选择") { pickCalendar() }
         root.addView(pill("从系统日历读入任务").apply {
             setOnClickListener { readCalendar() }
@@ -277,12 +281,17 @@ class SettingsActivity : Activity() {
         setPerm(exactState, Permissions.canExactAlarm(this))
         setPerm(batteryState, Permissions.ignoringBatteryOptimizations(this))
         setPerm(fullScreenState, Permissions.canFullScreenIntent(this))
+        setPerm(calendarReadState, hasReadCalendar())
         val calendarAllowed = CalendarWriter.hasPermission(this)
         // 状态列只回答「开没开」：固定宽度里放不下「已开启 · 日历名」，
         // 具体写进哪个日历不是必要信息，塞在这里只会被截断。
         calendarState.text = if (calendarAllowed) "已开启" else "未开启"
         calendarState.setTextColor(if (calendarAllowed) Ui.INK_2 else Ui.MUTED)
+        permButtons[calendarState]?.text = if (calendarAllowed) "查看" else "选择"
     }
+
+    private fun hasReadCalendar(): Boolean =
+        checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
 
     /** 权限状态与右侧按钮文案联动：已开就是「查看」，没开才是「去开启」。 */
     private fun setPerm(state: TextView, granted: Boolean) {
@@ -415,6 +424,7 @@ class SettingsActivity : Activity() {
             runOnUiThread {
                 stateView.text = message
                 toast(message)
+                refreshPermissions()
             }
         }.start()
     }
@@ -475,9 +485,11 @@ class SettingsActivity : Activity() {
                 if (!granted) toast("没有通知权限，提醒不会弹")
             }
             REQ_CALENDAR -> {
-                if (granted) readCalendar() else toast("没有日历权限")
+                refreshPermissions()
+                if (granted) readCalendar() else toast("没有读取日历的权限，手机日历里的日程读不进来")
             }
             REQ_CALENDAR_WRITE -> {
+                refreshPermissions()
                 if (granted) pickCalendar() else toast("没有日历写入权限")
             }
         }

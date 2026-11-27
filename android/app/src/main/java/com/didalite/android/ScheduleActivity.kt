@@ -96,6 +96,9 @@ class ScheduleActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // 冷启动或切回课表页时顺手在后台同步一轮：日历里新写的日程不必再去「专注」页点同步。
+        // 内部有 30 秒节流、没登入就跳过、失败静默，不打扰课表页。
+        Thread { SyncEngine.autoRun(applicationContext, db) }.start()
         // 只有课表文本或周次变了才重建整张格子；从别的 tab 切回来不再重复渲染。
         val raw = db.getMeta("schedule_text")
         if (raw == renderedRaw && week == renderedWeek) return

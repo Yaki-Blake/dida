@@ -179,36 +179,95 @@ object SystemCalendar {
     )
 
     /**
-     * 导入：新事件插入；已存在且日历侧有变化才覆盖；墓碑不复活，避免删了又被读回来。
+     * 导入：新事件插入；已存在且日历侧有变化才覆盖；墓碑只在**内容相同**时挡住，
+     * 内容不同说明事件号被新事件复用了，必须复活并推上云端。
      * 每导入一条就登记「任务 ↔ 事件」的对应关系，之后日历里删掉事件才认得出该删哪条任务。
      */
     fun importInto(db: Db, events: List<Event>): Int {
         var changed = 0
-        val byEvent = db.calendarLinks().entries.associate { (taskId, eventId) -> eventId to taskId }
+        val byEvent = linkIndex(db)
         // 旧编码会让事件号 3 和 30 撞成同一个 id，撞车的一批只能靠标题和时间认领
         val legacyGroups = events.groupBy { legacyEncode(it.eventId) }
         for (e in events) {
             val task = toTask(e)
             val old = resolveTask(db, e, byEvent, legacyGroups)
-            if (old == null) {
-                db.saveLocal(task)
-                db.linkCalendar(task.id, e.eventId)
-                changed++
-                continue
+            when (decide(old, task)) {
+                ImportAction.SKIP -> continue
+                ImportAction.INSERT -> {
+                    db.saveLocal(task)
+                    db.linkCalendar(task.id, e.eventId)
+                    changed++
+                }
+                ImportAction.REVIVE -> {
+                    // 事件号被复用了：Events._ID 是 INTEGER PRIMARY KEY（没有 AUTOINCREMENT），
+                    // 删掉末尾的事件后，下一次新建会拿回同一个号。日历里这条是**全新的**日程，
+                    // 不能因为同号的老任务还躺着墓碑就吞掉——否则用户写进去的日程永远变不成
+                    // 任务、永远传不上云端（表现就是「写进日历的日程同步不上去」）。
+                    db.saveLocal(
+                        task.copy(
+                            id = old!!.id,
+                            rev = old.rev,
+                            deleted = false,
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                    )
+                    db.linkCalendar(old.id, e.eventId)
+                    changed++
+                }
+                ImportAction.UPDATE -> {
+                    db.saveLocal(
+                        task.copy(
+                            id = old!!.id,
+                            rev = old.rev,
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                    )
+                    db.linkCalendar(old.id, e.eventId)
+                    changed++
+                }
             }
-            if (old.deleted) continue
-            val same = old.title == task.title &&
-                old.startAt == task.startAt &&
-                old.dueAt == task.dueAt &&
-                old.remindAt == task.remindAt &&
-                old.location == task.location &&
-                old.allDay == task.allDay
-            if (same) continue
-            db.saveLocal(task.copy(id = old.id, rev = old.rev, updatedAt = System.currentTimeMillis()))
-            db.linkCalendar(old.id, e.eventId)
-            changed++
         }
         return changed
+    }
+
+    /** 单条事件的导入结论。抽成纯函数，好在 JVM 单测里把各种组合都过一遍。 */
+    internal enum class ImportAction { SKIP, INSERT, REVIVE, UPDATE }
+
+    internal fun decide(old: Task?, task: Task): ImportAction = when {
+        old == null -> ImportAction.INSERT
+        // 墓碑 + 内容相同 = 用户/云端删掉的那条，不复活
+        old.deleted -> if (sameContent(old, task)) ImportAction.SKIP else ImportAction.REVIVE
+        sameContent(old, task) -> ImportAction.SKIP
+        else -> ImportAction.UPDATE
+    }
+
+    /** 日历侧内容与任务是否一致：标题、起止、提醒、地点、全天，六项全等才算没变。 */
+    internal fun sameContent(old: Task, task: Task): Boolean =
+        old.title == task.title &&
+            old.startAt == task.startAt &&
+            old.dueAt == task.dueAt &&
+            old.remindAt == task.remindAt &&
+            old.location == task.location &&
+            old.allDay == task.allDay
+
+    /**
+     * 「事件号 → 任务 id」的反查表。
+     * 同一个事件号可能挂着多条链接（新编码一条、旧编码一条，其中一条还是墓碑），
+     * 这里优先留**没被删**的那条，否则会把活着的事件错认成墓碑，进而被吞掉。
+     */
+    private fun linkIndex(db: Db): Map<Long, String> {
+        val index = linkedMapOf<Long, String>()
+        for ((taskId, eventId) in db.calendarLinks()) {
+            val current = index[eventId]
+            if (current == null) {
+                index[eventId] = taskId
+                continue
+            }
+            val currentDead = db.find(current)?.deleted ?: true
+            val candidateDead = db.find(taskId)?.deleted ?: true
+            if (currentDead && !candidateDead) index[eventId] = taskId
+        }
+        return index
     }
 
     /**

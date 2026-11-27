@@ -53,27 +53,62 @@ object SyncEngine {
         val afterNotes = db.notes().associate { it.id to it.updatedAt }
         val noteChanges = (beforeNotes.keys + afterNotes.keys).count { beforeNotes[it] != afterNotes[it] }
         val alarmChanged = beforeAlarms.sortedBy { it.id } != payload.alarms.sortedBy { it.id }
+        // 服务端每次回的都是**全量快照**（它不看 since），所以 payload.tasks 恒等于云端总数。
+        // 「下载」只能按本地更新前后的 updated_at 差来算，否则每条都报「下载 146 条」，
+        // 用户会以为一直在重复下载。
+        val downloaded = payload.tasks.count { sentAt[it.id] != it.updatedAt } +
+            payload.rejected.count { sentAt[it.id] != it.updatedAt }
 
         val sb = StringBuilder()
-        if (uploaded == 0 && payload.tasks.isEmpty() && alarmOps.isEmpty() && !alarmChanged &&
-            payload.rejected.isEmpty() && dirtyNotes.isEmpty() && noteChanges == 0
+        // dirtyNotes 是「全量便签快照」，恒非空，不能拿它判断有没有便签变化——
+        // 否则每次都多报一行「便签 上传 0 / 下载 0 条」。
+        val noteTouched = noteUploaded > 0 || noteChanges > 0
+        if (uploaded == 0 && downloaded == 0 && alarmOps.isEmpty() && !alarmChanged &&
+            payload.rejected.isEmpty() && !noteTouched && imported == 0 && cal.removed == 0
         ) {
             sb.append("已是最新，没有变化")
         } else {
-            sb.append("上传任务 $uploaded 条，下载任务 ${payload.tasks.size} 条")
+            sb.append("上传任务 $uploaded 条，下载任务 $downloaded 条")
             if (imported > 0) sb.append("，日历导入 $imported 条")
+            if (cal.removed > 0) sb.append("，日历删除 ${cal.removed} 条")
             if (alarmOps.isNotEmpty()) sb.append("，闹钟改动 ${alarmOps.size} 个")
             if (alarmChanged) sb.append("，闹钟 ${payload.alarms.size} 个")
-            if (dirtyNotes.isNotEmpty() || noteChanges > 0) sb.append("，便签 上传 $noteUploaded / 下载 $noteChanges 条")
+            if (noteTouched) sb.append("，便签 上传 $noteUploaded / 下载 $noteChanges 条")
+        }
+        // 日历权限没给时导入会被静默跳过，不说明白用户只会看到「没有变化」，误以为同步坏了
+        if (!hasCalendarPermission(context)) {
+            sb.append("\n没有「日历」权限，读不到手机日历里的日程。去「设置 → 系统日历」授权后再同步。")
         }
         db.setMeta("last_sync_at", System.currentTimeMillis().toString())
         return sb.toString()
     }
 
+    /**
+     * 打开 App 时在后台悄悄同步一轮：日历里新写的日程不用再去「专注」页翻同步按钮。
+     *
+     * 三条限制，避免帮倒忙：
+     * ① 没登入直接返回（不弹错、不写 last_sync_at）；
+     * ② 30 秒内已经自动同步过就跳过，防止来回切页把服务端刷爆；
+     * ③ 任何异常都吞掉——自动同步失败不该打扰用户，手动点同步时才会看到报错。
+     */
+    fun autoRun(context: Context, db: Db) {
+        if (db.getMeta("token").isNullOrEmpty()) return
+        val now = System.currentTimeMillis()
+        val last = db.getMeta(AUTO_SYNC_AT)?.toLongOrNull() ?: 0L
+        if (now - last < AUTO_SYNC_GAP_MS) return
+        db.setMeta(AUTO_SYNC_AT, now.toString())
+        runCatching { run(context, db) }
+    }
+
+    private const val AUTO_SYNC_AT = "last_auto_sync_at"
+    private const val AUTO_SYNC_GAP_MS = 30_000L
+
+    private fun hasCalendarPermission(context: Context): Boolean =
+        context.checkSelfPermission(Manifest.permission.READ_CALENDAR) ==
+            PackageManager.PERMISSION_GRANTED
+
     private fun importCalendarQuietly(context: Context, db: Db): Int {
-        if (context.checkSelfPermission(Manifest.permission.READ_CALENDAR)
-            != PackageManager.PERMISSION_GRANTED
-        ) return 0
+        if (!hasCalendarPermission(context)) return 0
         return try {
             SystemCalendar.importInto(db, SystemCalendar.read(context))
         } catch (e: Exception) {
