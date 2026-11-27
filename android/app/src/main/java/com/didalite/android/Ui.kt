@@ -34,6 +34,9 @@ object Ui {
     val ACCENT_INK = Color.parseColor("#FFFFFF")
     val WARN = Color.parseColor("#A97515")
 
+    /** 抓取遮罩：压在内容上的一层薄黑，让「正在取数据」看得见但不刺眼。 */
+    val SCRIM = Color.parseColor("#48000000")
+
     val display: Typeface = Typeface.create("sans-serif", Typeface.BOLD)
     val body: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)

@@ -14,15 +14,22 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 
 /**
- * 底部导航：课表 / 学业 / 时间 / 便签 / 设置。
+ * 底部导航：课表 / 学业 / 专注 / 第二课堂 / 设置。
+ *
+ * 「时间」与「便签」合并成「专注」一个一级入口（页内再分闹钟 / 便签两个子 tab），
+ * 腾出的位置给「第二课堂」。
  * 图标是手画的简笔画，不引图片资源：未选中只描边，选中填主题色。
  */
 object NavBar {
     const val SCHEDULE = 0
     const val STUDY = 1
-    const val TIME = 2
-    const val NOTES = 3
+    const val FOCUS = 2
+    const val SECOND = 3
     const val SETTINGS = 4
+
+    /** 旧入口的别名：闹钟 / 便签页现在都归到「专注」下，外部还按这两个名字引用。 */
+    const val TIME = FOCUS
+    const val NOTES = FOCUS
 
     /** 底栏总高度（dp）。页面算可用高度时要扣掉它，避免内容被压在导航下面。 */
     const val BAR_HEIGHT_DP = 65
@@ -33,11 +40,11 @@ object NavBar {
     private val TARGETS = arrayOf(
         ScheduleActivity::class.java,
         StudyActivity::class.java,
-        AlarmActivity::class.java,
-        NotesActivity::class.java,
+        FocusActivity::class.java,
+        SecondClassActivity::class.java,
         SettingsActivity::class.java,
     )
-    private val LABELS = arrayOf("课表", "学业", "时间", "便签", "设置")
+    private val LABELS = arrayOf("课表", "学业", "专注", "第二课堂", "设置")
 
     /** 把页面内容包成「内容 + 底部导航」。导航浮在内容上方，内容底部留出同样高度。 */
     fun wrap(activity: Activity, content: View, current: Int): View {
@@ -139,8 +146,8 @@ private class NavItem(
         when (kind) {
             NavBar.SCHEDULE -> calendar(canvas, cx, iconCy, r)
             NavBar.STUDY -> cap(canvas, cx, iconCy, r)
-            NavBar.TIME -> clock(canvas, cx, iconCy, r)
-            NavBar.NOTES -> note(canvas, cx, iconCy, r)
+            NavBar.FOCUS -> target(canvas, cx, iconCy, r)
+            NavBar.SECOND -> medal(canvas, cx, iconCy, r)
             else -> sliders(canvas, cx, iconCy, r)
         }
         canvas.drawText(label, cx, top + iconSize + gap - fm.ascent, textPaint)
@@ -197,33 +204,59 @@ private class NavItem(
         canvas.drawCircle(cx + r * 0.88f, cy + r * 0.52f, r * 0.11f, paint)
     }
 
-    /** 时钟：圆圈 + 时针分针 */
-    private fun clock(canvas: Canvas, cx: Float, cy: Float, r: Float) {
-        val radius = r * 0.76f
+    /** 专注：同心圆靶心（专注 / 计时） */
+    private fun target(canvas: Canvas, cx: Float, cy: Float, r: Float) {
+        val outer = r * 0.78f
         paint.style = if (selected) Paint.Style.FILL else Paint.Style.STROKE
         paint.strokeWidth = r * 0.12f
-        canvas.drawCircle(cx, cy, radius, paint)
+        canvas.drawCircle(cx, cy, outer, paint)
         paint.color = if (selected) paper else ink
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = r * 0.13f
-        canvas.drawLine(cx, cy, cx, cy - radius * 0.55f, paint)
-        canvas.drawLine(cx, cy, cx + radius * 0.42f, cy, paint)
+        paint.strokeWidth = r * 0.12f
+        canvas.drawCircle(cx, cy, outer * 0.56f, paint)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(cx, cy, outer * 0.20f, paint)
     }
 
-    /** 便签：圆角方框 + 三条横线 */
-    private fun note(canvas: Canvas, cx: Float, cy: Float, r: Float) {
-        val body = RectF(cx - r * 0.66f, cy - r * 0.78f, cx + r * 0.66f, cy + r * 0.78f)
-        val radius = r * 0.18f
+    /** 第二课堂：奖章（圆牌 + 下方两条绶带） */
+    private fun medal(canvas: Canvas, cx: Float, cy: Float, r: Float) {
+        val medalCy = cy - r * 0.22f
+        val radius = r * 0.56f
+        // 绶带先画，压在圆牌下面
+        paint.color = ink
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = r * 0.20f
+        canvas.drawLine(cx - radius * 0.42f, medalCy + radius * 0.55f, cx - radius * 0.72f, cy + r * 0.88f, paint)
+        canvas.drawLine(cx + radius * 0.42f, medalCy + radius * 0.55f, cx + radius * 0.72f, cy + r * 0.88f, paint)
+
         paint.style = if (selected) Paint.Style.FILL else Paint.Style.STROKE
         paint.strokeWidth = r * 0.12f
-        canvas.drawRoundRect(body, radius, radius, paint)
-        paint.color = if (selected) paper else ink
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = r * 0.12f
-        for (i in 0..2) {
-            val y = body.top + r * 0.42f + i * r * 0.36f
-            canvas.drawLine(body.left + r * 0.24f, y, body.right - r * 0.24f, y, paint)
+        canvas.drawCircle(cx, medalCy, radius, paint)
+        if (selected) {
+            // 选中填色时，中间压一颗纸色五角星，避免一团实心看不出是奖章
+            paint.color = paper
+            paint.style = Paint.Style.FILL
+            canvas.drawPath(star(cx, medalCy, radius * 0.52f), paint)
+        } else {
+            paint.color = ink
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = r * 0.10f
+            canvas.drawPath(star(cx, medalCy, radius * 0.52f), paint)
         }
+    }
+
+    /** 以 (cx,cy) 为中心、外接半径 rad 的五角星路径。 */
+    private fun star(cx: Float, cy: Float, rad: Float): Path {
+        val path = Path()
+        for (i in 0 until 10) {
+            val angle = Math.toRadians((i * 36 - 90).toDouble())
+            val len = if (i % 2 == 0) rad else rad * 0.42f
+            val x = cx + (len * Math.cos(angle)).toFloat()
+            val y = cy + (len * Math.sin(angle)).toFloat()
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        return path
     }
 
     /** 设置：三条滑杆 */

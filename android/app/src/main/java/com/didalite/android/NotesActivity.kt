@@ -31,6 +31,11 @@ import android.widget.Toast
  */
 class NotesActivity : Activity() {
 
+    companion object {
+        /** 由「专注」页的便签面板传进来：直接打开这条便签的编辑页。 */
+        const val EXTRA_NOTE_ID = "note_id"
+    }
+
     private lateinit var db: Db
 
     /** 正在同步：防止连点重复推拉。 */
@@ -62,9 +67,14 @@ class NotesActivity : Activity() {
         db = Db(this)
 
         val incoming = sharedTexts(intent)
+        val targetId = intent?.getStringExtra(EXTRA_NOTE_ID)
         if (incoming.isNotEmpty()) {
             // 从别的应用分享过来：单条直接进编辑器，多条一次性落库
             importIncoming(incoming, sharedSubject(intent))
+        } else if (!targetId.isNullOrEmpty()) {
+            // 从「专注」页点进来的：直接编辑这条
+            val note = db.note(targetId)
+            if (note != null) showEditor(note) else showList()
         } else {
             showList()
         }
@@ -76,9 +86,18 @@ class NotesActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         val texts = sharedTexts(intent)
-        if (texts.isEmpty()) return
-        persist()
-        importIncoming(texts, sharedSubject(intent))
+        if (texts.isNotEmpty()) {
+            persist()
+            importIncoming(texts, sharedSubject(intent))
+            return
+        }
+        // 「专注」页再点一条便签：旧实例还在（SINGLE_TOP），直接换到那条的编辑页
+        val targetId = intent?.getStringExtra(EXTRA_NOTE_ID)
+        if (!targetId.isNullOrEmpty()) {
+            persist()
+            val note = db.note(targetId)
+            if (note != null) showEditor(note) else showList()
+        }
     }
 
     override fun onPause() {

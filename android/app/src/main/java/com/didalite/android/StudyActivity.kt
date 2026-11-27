@@ -23,17 +23,15 @@ import android.widget.Toast
 import java.util.Locale
 
 /**
- * 学业页：学分绩点 + 第二课堂。
+ * 学业页：学分绩点。
  *
- * 两个分段共用一条页面骨架（顶部工具条 + 内容区），数据各抓各的：
- * 学分绩点走教务（强智 jsxsd，要验证码），第二课堂走校团委那套（要校内网 / VPN）。
- * 抓到的明细存 Db，下次打开先显示缓存，再手动刷新。
+ * 第二课堂已经独立成底栏的「二课堂」一级入口，这里不再放它。
+ * 数据走教务（强智 jsxsd，要验证码）：抓到的明细存 Db，下次打开先显示缓存，再手动刷新。
  */
 class StudyActivity : Activity() {
 
     private companion object {
         const val TAB_GRADES = 0
-        const val TAB_SECOND = 1
         const val TOP_PADDING_DP = 10
     }
 
@@ -42,7 +40,6 @@ class StudyActivity : Activity() {
     private var busy = false
 
     private var grades: EduGrades.Report? = null
-    private var second: EduSecondClass.Report? = null
 
     private lateinit var tabs: LinearLayout
     private lateinit var body: LinearLayout
@@ -57,7 +54,6 @@ class StudyActivity : Activity() {
         super.onCreate(savedInstanceState)
         db = Db(this)
         grades = EduStore.loadGrades(db)
-        second = EduStore.loadSecond(db)
         setContentView(NavBar.wrap(this, buildUi(), NavBar.STUDY))
         applyDidaTheme()
         render()
@@ -98,15 +94,11 @@ class StudyActivity : Activity() {
         busyDots.forEach { it.cancel() }
         busyDots = emptyList()
         tabs.removeAllViews()
-        tabs.addView(tabPill("学分绩点", TAB_GRADES), gapParams(weight = 1f, end = 6))
-        tabs.addView(tabPill("第二课堂", TAB_SECOND), gapParams(weight = 1f))
+        tabs.addView(tabPill("学分绩点", TAB_GRADES), gapParams(weight = 1f))
 
         body.removeAllViews()
         if (busy) body.addView(busyRow())
-        when (tab) {
-            TAB_GRADES -> renderGrades()
-            else -> renderSecond()
-        }
+        renderGrades()
     }
 
     /** 抓取中：大字提示 + 三个圆点错峰上下波动。 */
@@ -117,7 +109,7 @@ class StudyActivity : Activity() {
         }
         row.setPadding(0, dpx(16), 0, dpx(4))
         row.addView(TextView(this).apply {
-            text = busyLabel.ifBlank { if (tab == TAB_SECOND) "正在抓取第二课堂" else "正在抓取成绩" }
+            text = busyLabel.ifBlank { "正在抓取成绩" }
             textSize = 18f
             typeface = Ui.medium
             setTextColor(Ui.INK)
@@ -161,7 +153,6 @@ class StudyActivity : Activity() {
                 title = "还没有学分绩点",
                 hint = "用教务系统的学号与密码，验证码和课表那边一样。",
                 action = "登录教务",
-                secondClass = false,
             )
             return
         }
@@ -203,34 +194,7 @@ class StudyActivity : Activity() {
         }
     }
 
-    private fun renderSecond() {
-        val report = second
-        if (report == null) {
-            emptyState(
-                title = "还没有第二课堂成绩",
-                hint = "这套系统在校内网里，校外要先连学校 VPN。",
-                action = "登录第二课堂",
-                secondClass = true,
-            )
-            return
-        }
-
-        body.addView(
-            statRow(
-                "总学分" to format(report.total, 1),
-                "完成" to "${report.percent.toInt()}%",
-            )
-        )
-
-        report.items.forEach { item ->
-            val right = "${format(item.credit, 1)}  /  ${format(item.need, 1)}"
-            body.addView(
-                line(item.name, right, if (item.need > 0 && item.credit >= item.need) Ui.INK else Ui.WARN, big = true)
-            )
-        }
-    }
-
-    private fun emptyState(title: String, hint: String, action: String, secondClass: Boolean) {
+    private fun emptyState(title: String, hint: String, action: String) {
         body.addView(TextView(this).apply {
             text = title
             textSize = 18f
@@ -247,12 +211,11 @@ class StudyActivity : Activity() {
         })
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(
-            button(action, primary = true, small = false) { askLogin(secondClass) },
+            button(action, primary = true, small = false) { askLogin() },
             gapParams(weight = 1f, end = 8),
         )
-        row.addView(button("用浏览器打开", small = false) { openBrowser(secondClass) }, gapParams(weight = 1f))
+        row.addView(button("用浏览器打开", small = false) { openBrowser() }, gapParams(weight = 1f))
         body.addView(row)
-        if (secondClass) body.addView(caption("账号是学号，初始密码为学号@abc。", top = dpx(12)))
     }
 
     // ---------- 抓取 ----------
@@ -262,19 +225,19 @@ class StudyActivity : Activity() {
             toast("正在抓取，稍等")
             return
         }
-        askLogin(tab == TAB_SECOND)
+        askLogin()
     }
 
-    private fun askLogin(secondClass: Boolean) {
+    private fun askLogin() {
         if (busy) {
             toast("正在抓取，稍等")
             return
         }
-        val column = dialogCard(if (secondClass) "登录第二课堂" else "登录教务")
+        val column = dialogCard("登录教务")
         val user = input("学号", InputType.TYPE_CLASS_NUMBER)
-        user.setText(db.getMeta(if (secondClass) "2kt_xh" else "jwxt_xh").orEmpty())
+        user.setText(db.getMeta("jwxt_xh").orEmpty())
         val pwd = input(
-            if (secondClass) "第二课堂密码（初始为学号@abc）" else "教务密码",
+            "教务密码",
             InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
         )
         column.addView(user, wide())
@@ -295,7 +258,7 @@ class StudyActivity : Activity() {
                 return@setOnClickListener
             }
             dialog.dismiss()
-            if (secondClass) fetchSecond(name, pass) else askCaptcha(name, pass)
+            askCaptcha(name, pass)
         }
         (actions.getChildAt(0) as TextView).setOnClickListener { dialog.dismiss() }
     }
@@ -440,33 +403,6 @@ class StudyActivity : Activity() {
         }.start()
     }
 
-    private fun fetchSecond(user: String, pwd: String) {
-        busy = true
-        busyLabel = "正在抓取第二课堂"
-        render()
-        Thread {
-            runCatching { EduSecondClass.fetch(EduSecondClass.DEFAULT_BASE, user, pwd) }
-                .onSuccess { report ->
-                    db.setMeta("2kt_xh", user)
-                    EduStore.saveSecond(db, report)
-                    runOnUiThread {
-                        busy = false
-                        busyLabel = ""
-                        second = report
-                        render()
-                    }
-                }
-                .onFailure { error ->
-                    runOnUiThread {
-                        busy = false
-                        busyLabel = ""
-                        render()
-                        fail("抓第二课堂失败", error)
-                    }
-                }
-        }.start()
-    }
-
     private fun fail(title: String, error: Throwable) {
         val message = error.message ?: error.javaClass.simpleName
         val column = dialogCard(title)
@@ -485,13 +421,12 @@ class StudyActivity : Activity() {
         (actions.getChildAt(0) as TextView).setOnClickListener { dialog.dismiss() }
         (actions.getChildAt(1) as TextView).setOnClickListener {
             dialog.dismiss()
-            openBrowser(tab == TAB_SECOND)
+            openBrowser()
         }
     }
 
-    private fun openBrowser(secondClass: Boolean) {
-        val url = if (secondClass) EduSecondClass.DEFAULT_BASE else "${JwxtApi.DEFAULT_BASE}/jsxsd/"
-        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    private fun openBrowser() {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("${JwxtApi.DEFAULT_BASE}/jsxsd/"))) }
             .onFailure { toast("这台设备没有能打开的浏览器") }
     }
 

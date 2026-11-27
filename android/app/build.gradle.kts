@@ -28,7 +28,10 @@ android {
 }
 
 dependencies {
-    // 界面用原生 View，零第三方依赖；单测只引 JUnit，不参与 APK
+    // 界面全部用原生 View，不引 androidx；单测只引 JUnit，不参与 APK。
+    // 唯一的运行时依赖是 zxing 的 core：纯 Java、无 Android 依赖、无传递依赖，
+    // 只用来把扫码拿到的图像解成字符串（第二课堂的「扫码签到签退」）。
+    implementation("com.google.zxing:core:3.5.3")
     testImplementation("junit:junit:4.13.2")
 }
 

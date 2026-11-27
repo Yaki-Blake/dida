@@ -67,11 +67,12 @@ class MainActivity : Activity() {
             typeface = Ui.display
             setTextColor(Ui.INK)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        titleRow.addView(pill("便签", small = true).apply {
-            setOnClickListener { startActivity(Intent(this@MainActivity, NotesActivity::class.java)) }
-        }, gapParams(start = 6))
-        titleRow.addView(pill("闹钟", small = true).apply {
-            setOnClickListener { startActivity(Intent(this@MainActivity, AlarmActivity::class.java)) }
+        titleRow.addView(pill("专注", small = true).apply {
+            setOnClickListener {
+                startActivity(
+                    Intent(this@MainActivity, FocusActivity::class.java).putExtra("tab", "note")
+                )
+            }
         }, gapParams(start = 6))
         titleRow.addView(pill("设置", small = true).apply {
             setOnClickListener { openSettings() }
