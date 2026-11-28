@@ -249,7 +249,8 @@ public sealed partial class ScheduleViewModel : ObservableObject
         DetailPeriodName = $"第 {course.Period} 节";
         DetailWeekName = $"第 {course.Week} 教学周";
         DetailPeriod = $"{DetailPeriodName} · {DetailWeekName}";
-        DetailRoom = string.IsNullOrWhiteSpace(course.Room) ? "未填写" : course.Room;
+        // 地点与课表卡片同一口径：只留「教学楼名 + 房号」，楼栋代码 / 实验室说明不显示
+        DetailRoom = string.IsNullOrWhiteSpace(course.Room) ? "未填写" : course.RoomShort;
         DetailTeacher = string.IsNullOrWhiteSpace(course.Teacher) ? "未填写" : course.Teacher;
         DetailWeeks = string.IsNullOrWhiteSpace(course.WeeksExpr) ? "全学期" : course.WeeksExpr;
 
@@ -279,14 +280,14 @@ public sealed partial class ScheduleViewModel : ObservableObject
     private void RefreshLongNoteDisplay()
     {
         LongNoteIsEmpty = string.IsNullOrWhiteSpace(NoteText);
-        LongNoteDisplay = LongNoteIsEmpty ? "还没有长期备注 · 点这里写" : NoteText;
+        LongNoteDisplay = LongNoteIsEmpty ? "还没有长期备注，点这里写" : NoteText;
     }
 
     /// <summary>把单次备注的正文同步到只读展示区。</summary>
     private void RefreshOnceNoteDisplay()
     {
         OnceNoteIsEmpty = string.IsNullOrWhiteSpace(OnceNoteText);
-        OnceNoteDisplay = OnceNoteIsEmpty ? "还没有单次备注 · 点这里写" : OnceNoteText;
+        OnceNoteDisplay = OnceNoteIsEmpty ? "还没有单次备注，点这里写" : OnceNoteText;
     }
 
     /// <summary>点长期备注卡：进入编辑态。</summary>

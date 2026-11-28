@@ -6,22 +6,73 @@
          关闭按钮走 CloseCommand：课表页关自己的卡片，主界面关右侧面板。 -->
     <UserControl.Resources>
         <!-- 本控件被课表页卡片和主界面右侧面板共用，两处各自的资源字典里不一定有转换器，
-             所以这里自带一份，不依赖宿主 -->
+              所以这里自带一份，不依赖宿主 -->
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
-        <!-- 备注卡片的只读态：整块可点，点进去就地编辑 -->
-        <Style x:Key="NoteCard" TargetType="Border">
+        <!-- 备注的书写面：卡片自己就是那张纸。
+             只读时是 bg-app 上的一层浅纸，编辑时抬成 bg-surface 并换成聚焦色描边——
+             里面不再套第二个带框输入框（嵌套框就是「卡中卡」，一层容器够了）。 -->
+        <Style x:Key="NoteSheet" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource bg-app}" />
             <Setter Property="BorderBrush" Value="{DynamicResource line}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="{StaticResource RadiusS}" />
-            <Setter Property="Padding" Value="9,7" />
+            <Setter Property="CornerRadius" Value="{StaticResource RadiusM}" />
+            <Setter Property="Padding" Value="12,10" />
             <Setter Property="Cursor" Value="Hand" />
             <Style.Triggers>
+                <!-- 悬停只把描边压深一档：这张纸本来就可点，不需要整块换色 -->
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="BorderBrush" Value="{DynamicResource accent}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource text-tertiary}" />
                 </Trigger>
             </Style.Triggers>
+        </Style>
+
+        <!-- 备注的小标题：放在纸外面当分组标签，纸里只留正文 -->
+        <Style x:Key="NoteCaption" TargetType="TextBlock" BasedOn="{StaticResource GroupHeader}">
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+
+        <!-- 纸上的字：无框、透明底、行高固定，写完自动长高到上限才出现滚动条 -->
+        <Style x:Key="NoteEditor" TargetType="TextBox">
+            <Setter Property="FontFamily" Value="{StaticResource AppFont}" />
+            <Setter Property="FontSize" Value="{StaticResource FontSize13}" />
+            <!-- TextBox 自己没有 LineHeight/LineStackingStrategy，得走 TextBlock 的附加属性 -->
+            <Setter Property="TextBlock.LineHeight" Value="20" />
+            <Setter Property="TextBlock.LineStackingStrategy" Value="BlockLineHeight" />
+            <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+            <Setter Property="Foreground" Value="{DynamicResource text-primary}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource accent}" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource accent-weak}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="AcceptsReturn" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+            <!-- 焦点由外面这张纸的描边表达，输入框自己不再画虚线框 -->
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Focusable="False"
+                                      Padding="{TemplateBinding Padding}"
+                                      HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 编辑态的空纸提示：只在没字时浮在字的位置，不参与命中，点哪儿都还是在写字 -->
+        <Style x:Key="NotePlaceholder" TargetType="TextBlock" BasedOn="{StaticResource BaseText}">
+            <Setter Property="FontSize" Value="{StaticResource FontSize13}" />
+            <Setter Property="LineHeight" Value="20" />
+            <Setter Property="Foreground" Value="{DynamicResource text-tertiary}" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Visibility" Value="Collapsed" />
         </Style>
     </UserControl.Resources>
 
@@ -43,18 +94,27 @@
             <!-- ============ 备注区：放在最上面，所见即所得 ============ -->
 
             <!-- 长期备注：这门课所有课次共用 -->
-            <Border x:Name="LongNoteCard" Style="{StaticResource NoteCard}" Margin="0,0,0,8">
+            <TextBlock Text="长期备注" Style="{StaticResource NoteCaption}" />
+
+            <Border x:Name="LongNoteCard" Margin="0,0,0,14">
+                <Border.Style>
+                    <Style TargetType="Border" BasedOn="{StaticResource NoteSheet}">
+                        <Style.Triggers>
+                            <!-- 编辑态：纸抬起来、描边成聚焦色，这一层变化就是焦点提示 -->
+                            <DataTrigger Binding="{Binding IsEditingLongNote}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource bg-surface}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource accent}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
 
                 <StackPanel>
-                    <TextBlock Text="长期备注" FontSize="{StaticResource FontSize11}"
-                               FontWeight="SemiBold" Margin="0,0,0,4"
-                               Foreground="{DynamicResource text-secondary}" />
-
                     <!-- 只读态：直接读出正文；没写过就给一句可点的提示 -->
                     <TextBlock Text="{Binding LongNoteDisplay}"
                                TextWrapping="Wrap"
                                FontSize="{StaticResource FontSize13}"
-                               LineHeight="19"
+                               LineHeight="20"
                                MaxHeight="112"
                                TextTrimming="CharacterEllipsis"
                                ToolTip="{Binding NoteText}">
@@ -65,35 +125,54 @@
                                     <DataTrigger Binding="{Binding LongNoteIsEmpty}" Value="True">
                                         <Setter Property="Foreground" Value="{DynamicResource text-tertiary}" />
                                     </DataTrigger>
+                                    <!-- 编辑态下让位给输入框：两段文字叠在一起没有意义 -->
+                                    <DataTrigger Binding="{Binding IsEditingLongNote}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
 
-                    <!-- 编辑态：输入框 + 保存 / 取消。整套只在编辑时占位，不编辑时不影响布局 -->
-                    <StackPanel Visibility="{Binding IsEditingLongNote, Converter={StaticResource BoolToVis}}"
-                                Margin="0,6,0,0">
-                        <TextBox Text="{Binding NoteText, UpdateSourceTrigger=PropertyChanged}"
-                                 AcceptsReturn="True" TextWrapping="Wrap" Height="88"
-                                 VerticalScrollBarVisibility="Auto" Padding="8"
-                                 FontSize="{StaticResource FontSize13}"
-                                 Background="{DynamicResource bg-surface}"
-                                 Foreground="{DynamicResource text-primary}"
-                                 BorderBrush="{DynamicResource line}" />
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
-                            <Button Content="清除" Style="{StaticResource GhostButton}"
-                                    Command="{Binding ClearNoteCommand}" Margin="0,0,6,0"
-                                    Padding="8,3" FontSize="{StaticResource FontSize11}" />
-                            <Button Content="取消" Style="{StaticResource GhostButton}"
-                                    Command="{Binding CancelLongNoteCommand}" Margin="0,0,6,0"
-                                    Padding="8,3" FontSize="{StaticResource FontSize11}" />
-                            <Button Content="保存" Style="{StaticResource PrimaryButton}"
+                    <!-- 编辑态：同一张纸上就地写，横线上方是正文、下方是动作 -->
+                    <StackPanel Visibility="{Binding IsEditingLongNote, Converter={StaticResource BoolToVis}}">
+                        <Grid>
+                            <TextBox x:Name="LongNoteBox"
+                                     Style="{StaticResource NoteEditor}"
+                                     Text="{Binding NoteText, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="96"
+                                     MaxHeight="240" />
+                            <TextBlock Text="写点备注…">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource NotePlaceholder}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding NoteText}" Value="">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource line}" Margin="0,10,0,0" />
+
+                        <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                            <Button DockPanel.Dock="Left" Content="清除"
+                                    Style="{StaticResource GhostButton}"
+                                    Command="{Binding ClearNoteCommand}" />
+                            <Button DockPanel.Dock="Right" Content="保存"
+                                    Style="{StaticResource PrimaryButton}"
                                     Command="{Binding SaveNoteCommand}"
-                                    Padding="10,3" FontSize="{StaticResource FontSize11}" />
-                        </StackPanel>
+                                    MinWidth="64" />
+                            <Button DockPanel.Dock="Right" Content="取消"
+                                    Style="{StaticResource GhostButton}"
+                                    Command="{Binding CancelLongNoteCommand}"
+                                    Margin="0,0,6,0" />
+                        </DockPanel>
                     </StackPanel>
 
-                    <TextBlock Text="{Binding NoteHint}" TextWrapping="Wrap" Margin="0,4,0,0">
+                    <TextBlock Text="{Binding NoteHint}" TextWrapping="Wrap" Margin="0,6,0,0">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource HintText}">
                                 <Style.Triggers>
@@ -108,17 +187,25 @@
             </Border>
 
             <!-- 单次备注：只这一天这一次课 -->
-            <Border x:Name="OnceNoteCard" Style="{StaticResource NoteCard}" Margin="0,0,0,16">
+            <TextBlock Text="单次备注" Style="{StaticResource NoteCaption}" />
+
+            <Border x:Name="OnceNoteCard" Margin="0,0,0,16">
+                <Border.Style>
+                    <Style TargetType="Border" BasedOn="{StaticResource NoteSheet}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsEditingOnceNote}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource bg-surface}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource accent}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
 
                 <StackPanel>
-                    <TextBlock Text="单次备注" FontSize="{StaticResource FontSize11}"
-                               FontWeight="SemiBold" Margin="0,0,0,4"
-                               Foreground="{DynamicResource text-secondary}" />
-
                     <TextBlock Text="{Binding OnceNoteDisplay}"
                                TextWrapping="Wrap"
                                FontSize="{StaticResource FontSize13}"
-                               LineHeight="19"
+                               LineHeight="20"
                                MaxHeight="92"
                                TextTrimming="CharacterEllipsis"
                                ToolTip="{Binding OnceNoteText}">
@@ -129,34 +216,52 @@
                                     <DataTrigger Binding="{Binding OnceNoteIsEmpty}" Value="True">
                                         <Setter Property="Foreground" Value="{DynamicResource text-tertiary}" />
                                     </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsEditingOnceNote}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>
                     </TextBlock>
 
-                    <StackPanel Visibility="{Binding IsEditingOnceNote, Converter={StaticResource BoolToVis}}"
-                                Margin="0,6,0,0">
-                        <TextBox Text="{Binding OnceNoteText, UpdateSourceTrigger=PropertyChanged}"
-                                 AcceptsReturn="True" TextWrapping="Wrap" Height="72"
-                                 VerticalScrollBarVisibility="Auto" Padding="8"
-                                 FontSize="{StaticResource FontSize13}"
-                                 Background="{DynamicResource bg-surface}"
-                                 Foreground="{DynamicResource text-primary}"
-                                 BorderBrush="{DynamicResource line}" />
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
-                            <Button Content="清除" Style="{StaticResource GhostButton}"
-                                    Command="{Binding ClearOnceNoteCommand}" Margin="0,0,6,0"
-                                    Padding="8,3" FontSize="{StaticResource FontSize11}" />
-                            <Button Content="取消" Style="{StaticResource GhostButton}"
-                                    Command="{Binding CancelOnceNoteCommand}" Margin="0,0,6,0"
-                                    Padding="8,3" FontSize="{StaticResource FontSize11}" />
-                            <Button Content="保存" Style="{StaticResource PrimaryButton}"
+                    <StackPanel Visibility="{Binding IsEditingOnceNote, Converter={StaticResource BoolToVis}}">
+                        <Grid>
+                            <TextBox x:Name="OnceNoteBox"
+                                     Style="{StaticResource NoteEditor}"
+                                     Text="{Binding OnceNoteText, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="76"
+                                     MaxHeight="200" />
+                            <TextBlock Text="写点备注…">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource NotePlaceholder}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding OnceNoteText}" Value="">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource line}" Margin="0,10,0,0" />
+
+                        <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                            <Button DockPanel.Dock="Left" Content="清除"
+                                    Style="{StaticResource GhostButton}"
+                                    Command="{Binding ClearOnceNoteCommand}" />
+                            <Button DockPanel.Dock="Right" Content="保存"
+                                    Style="{StaticResource PrimaryButton}"
                                     Command="{Binding SaveOnceNoteCommand}"
-                                    Padding="10,3" FontSize="{StaticResource FontSize11}" />
-                        </StackPanel>
+                                    MinWidth="64" />
+                            <Button DockPanel.Dock="Right" Content="取消"
+                                    Style="{StaticResource GhostButton}"
+                                    Command="{Binding CancelOnceNoteCommand}"
+                                    Margin="0,0,6,0" />
+                        </DockPanel>
                     </StackPanel>
 
-                    <TextBlock Text="{Binding OnceNoteHint}" TextWrapping="Wrap" Margin="0,4,0,0">
+                    <TextBlock Text="{Binding OnceNoteHint}" TextWrapping="Wrap" Margin="0,6,0,0">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource HintText}">
                                 <Style.Triggers>

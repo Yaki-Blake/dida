@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using DidaLite.App.Services;
 using DidaLite.App.ViewModels;
@@ -34,6 +35,13 @@ public partial class ScheduleView : UserControl
     private double _detailDragWidth;
 
     /// <summary>
+    /// 一次「空白点击」的按下位置。详情栏开着时，点网格空白处就收起它；
+    /// 按下和抬起必须都落在空白处、位移很小才算点击，拖动滚动不能误伤。
+    /// </summary>
+    private Point _blankClickStart;
+    private bool _blankClickArmed;
+
+    /// <summary>
     /// 周六、周日两列合计占的宽度（= 右侧详情栏的宽度），由 XAML 绑到两个
     /// <see cref="WeekColumnsPanel"/> 的 WeekendWidth 上。
     /// 做成依赖属性是为了让面板重建（切周、导入课表）后绑定依然成立。
@@ -56,6 +64,89 @@ public partial class ScheduleView : UserControl
 
         // 窗口尺寸变化时重算能给出的最大宽度；ClampDetailWidth 内部会把新的周末列宽下发
         RootLayout.SizeChanged += (_, _) => ClampDetailWidth();
+
+        // 点课表网格的空白处收起右侧详情栏。挂在 WeekScroll 上：它盖住整个课表主体，
+        // 网格下方那段没行的空白也算。详情卡片与那条拖动分隔线都是 WeekScroll 的
+        // 兄弟覆盖层，点它们走的是另一条路由路径，不会冒泡到这里，
+        // 所以不会出现「点自己的面板反而把它关掉」。
+        WeekScroll.PreviewMouseLeftButtonDown += OnGridBlankDown;
+        WeekScroll.PreviewMouseLeftButtonUp += OnGridBlankUp;
+    }
+
+    /// <summary>详情开着时在网格里按下：先确认按的是空白处，再记下位置。</summary>
+    private void OnGridBlankDown(object sender, MouseButtonEventArgs e)
+    {
+        _blankClickArmed = false;
+        if ((DataContext as ScheduleViewModel)?.IsDetailOpen != true) return;
+        if (e.OriginalSource is not DependencyObject source) return;
+        if (IsInteractiveClickTarget(source)) return;
+        if (IsDetailChrome(source)) return;
+
+        _blankClickStart = e.GetPosition(this);
+        _blankClickArmed = true;
+    }
+
+    /// <summary>
+    /// 抬起时按下点都在空白处、位移不超过 4px 才算一次点击，才收起。
+    /// 这样按住空白处拖动滚动、或按在空白处却拖到课程卡上抬起，都不会误关面板。
+    /// 位移判定抽成 <see cref="IsBlankClick"/>，这样它能被单元测试直接覆盖
+    /// （合成事件拿不到真实光标坐标，离屏测不了这一段）。
+    /// </summary>
+    private void OnGridBlankUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_blankClickArmed) return;
+        _blankClickArmed = false;
+
+        if ((DataContext as ScheduleViewModel)?.IsDetailOpen != true) return;
+        if (e.OriginalSource is not DependencyObject source) return;
+        if (IsInteractiveClickTarget(source)) return;
+        if (IsDetailChrome(source)) return;
+        if (!IsBlankClick(_blankClickStart, e.GetPosition(this))) return;
+
+        // 与 Esc 同一条路径：未点保存的备注由 CloseDetail 自己落盘
+        (DataContext as ScheduleViewModel)?.CloseDetailCommand.Execute(null);
+    }
+
+    /// <summary>按下点到抬起点的位移在容差内才算「点了一下」，超了就是拖动。</summary>
+    internal const double BlankClickSlop = 4;
+
+    /// <summary>纯判定：位移不超过 <see cref="BlankClickSlop"/> 像素才算点击。</summary>
+    internal static bool IsBlankClick(Point down, Point up)
+        => (up - down).Length <= BlankClickSlop;
+
+    /// <summary>
+    /// 课程卡片、按钮、输入框、滚动条这些可交互的东西不算「空白」。
+    /// 卡片是 Border + 鼠标事件，没有 Button 基类，和主界面一样用 Cursor=Hand 识别。
+    /// </summary>
+    private static bool IsInteractiveClickTarget(DependencyObject source)
+    {
+        for (DependencyObject? node = source; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is ButtonBase or TextBoxBase or ComboBox or PasswordBox
+                or ScrollBar or Slider or ListBoxItem or TreeViewItem or TabItem)
+                return true;
+
+            if (node is FrameworkElement fe && fe.Cursor == Cursors.Hand)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 命中的是不是详情栏自己的那层皮（面板本体或左边那条拖动条）。
+    /// 现在两者都是 WeekScroll 的兄弟节点，点它们本来就到不了这里的处理器；
+    /// 这层判断是为了将来有人把面板挪进滚动区时，仍然不会「点自己的面板把它关掉」。
+    /// </summary>
+    private bool IsDetailChrome(DependencyObject source)
+    {
+        for (DependencyObject? node = source; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (ReferenceEquals(node, CourseDetailCard) || ReferenceEquals(node, DetailSplitter))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>详情展开瞬间按上次的宽度恢复（没拖过就是默认 300）。</summary>

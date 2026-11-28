@@ -15,6 +15,8 @@
 
     <Window.Resources>
         <conv:BrushKeyConverter x:Key="BrushKey" />
+        <conv:CourseFillConverter x:Key="CourseFill" />
+        <conv:CourseStrokeConverter x:Key="CourseStroke" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
         <DataTemplate x:Key="TaskRow">
@@ -146,7 +148,8 @@
             <Setter Property="ItemTemplate" Value="{StaticResource GroupRow}" />
         </Style>
 
-        <!-- 日视图左侧课程带的一节课：一块实心卡片，和时间轴、日程块一样边界清楚 -->
+        <!-- 日视图左侧课程带的一节课：块按上课 / 下课时刻铺满自己那一段，
+             四角圆润，底色按课程名取色（与课表页、网页端同一套配色）。 -->
         <DataTemplate x:Key="DayCourseBlock">
             <Border Background="Transparent"
                     Cursor="Hand"
@@ -154,10 +157,10 @@
                     beh:ClickPop.Enabled="True"
                     ToolTip="{Binding Tooltip}"
                     MouseLeftButtonUp="DayCourse_Click">
-                <Border Background="{DynamicResource accent-weak}"
-                        BorderBrush="{DynamicResource accent}"
+                <Border Background="{Binding Course.Name, Converter={StaticResource CourseFill}}"
+                        BorderBrush="{Binding Course.Name, Converter={StaticResource CourseStroke}}"
                         BorderThickness="3,0,0,0"
-                        CornerRadius="{StaticResource RadiusS}"
+                        CornerRadius="{StaticResource RadiusM}"
                         Margin="0,1,5,1"
                         Padding="9,3,6,0">
                     <StackPanel VerticalAlignment="Top">

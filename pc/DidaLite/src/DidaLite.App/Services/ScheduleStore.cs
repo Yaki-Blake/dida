@@ -35,6 +35,13 @@ public sealed class ScheduleEvent
 
     /// <summary>这一节课是否写了单次备注（只对这一天的这一次有效）。</summary>
     [JsonIgnore] public bool HasOnceNote { get; set; }
+
+    /// <summary>
+    /// 显示用的教室：只留「教学楼名 + 房号」（笃行楼(SJ2)419 → 笃行楼419）。
+    /// 原始 <see cref="Room"/> 不动，ICS 与 5080 接口仍给教务系统原文，
+    /// 所以这只是界面那一层的口径，标了 JsonIgnore 不进契约。
+    /// </summary>
+    [JsonIgnore] public string RoomShort => RoomDisplay.Shorten(Room);
 }
 
 /// <summary>随程序附带的课表快照文件（schedule.json）。</summary>

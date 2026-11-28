@@ -30,12 +30,16 @@ public sealed class DayCourseBlockViewModel
         ? Course.Start
         : $"{Course.Start} – {Course.End}";
 
-    /// <summary>教室 · 老师，缺哪个就只留另一个。悬停提示用，卡片里两者各占一行。</summary>
+    /// <summary>
+    /// 教室 · 老师，缺哪个就只留另一个。悬停提示用，卡片里两者各占一行。
+    /// 这里用原始教室（带楼栋代码 / 实验室说明）：卡片上只写「笃行楼419」，
+    /// 想知道完整地点就悬停——和课表页卡片的 ToolTip 同一个分工。
+    /// </summary>
     public string MetaText
     {
         get
         {
-            var room = RoomText;
+            var room = Course.Room?.Trim() ?? string.Empty;
             var teacher = TeacherText;
 
             if (room.Length == 0) return teacher;
@@ -44,8 +48,8 @@ public sealed class DayCourseBlockViewModel
         }
     }
 
-    /// <summary>教室，单独一行。</summary>
-    public string RoomText => Course.Room?.Trim() ?? string.Empty;
+    /// <summary>教室，单独一行：只留「教学楼名 + 房号」，楼栋代码与实验室说明不显示。</summary>
+    public string RoomText => Course.RoomShort;
 
     /// <summary>老师，单独一行，短课名挤不下时优先让位。</summary>
     public string TeacherText => Course.Teacher?.Trim() ?? string.Empty;

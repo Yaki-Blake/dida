@@ -150,6 +150,15 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+  // 教室只留「教学楼名 + 房号」：笃行楼(SJ2)419 → 笃行楼419、
+  // 拓新楼205（计算机基础实验室）→ 拓新楼205、同心楼405-计算机专业实验室 → 同心楼405。
+  // 原文留在 title 里，悬停能看全；与桌面端 RoomDisplay.Shorten 同一口径。
+  function shortRoom(s) {
+    return String(s == null ? '' : s)
+      .replace(/[（(][^）)]*[）)]/g, '')
+      .replace(/([0-9])\s*[-—–]\s*[^0-9]*$/g, '$1')
+      .trim();
+  }
   function hue(s) {
     var h = 0;
     for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
@@ -208,7 +217,7 @@
         list.forEach(function (e) {
           html += '<div class="card" style="' + colorOf(e.name) + '">' +
                   '<span class="n">' + esc(e.name) + '</span>' +
-                  '<span class="r">' + esc(e.room) + '</span>' +
+                  '<span class="r" title="' + esc(e.room) + '">' + esc(shortRoom(e.room)) + '</span>' +
                   '<span class="t">' + esc(e.start) + '–' + esc(e.end) +
                   (e.teacher ? ' · ' + esc(e.teacher) : '') + '</span></div>';
         });
@@ -295,6 +304,148 @@
       boot(data, '实时接口', '');
     })
     .catch(function () { offlineFallback(); });
+})();
+</script>
+<script>
+/* 中键（滚轮按下）自动滚动：点一下进入模式，鼠标离按下点越远画面走得越快；
+   左键点一下 / 再按中键 / 拨滚轮 / Esc 退出。
+   曲线与 WPF 端 Behaviors/MiddleDragScroll.cs 保持一致，两端手感一样。
+   桌面浏览器自带中键自动滚动，这里 preventDefault 顶掉原生那份，免得速度叠加。 */
+(function () {
+  'use strict';
+  if (window.__didaMiddleScroll) return;
+  window.__didaMiddleScroll = true;
+
+  var DEAD = 8, TOP_AT = 280, POW = 1.7, DAMP = 0.45, FACTOR = 2.6, MIN_TOP = 420, EASE = 18;
+  var scroller = null, anchor = null, pointer = null;
+  var vx = 0, vy = 0, last = 0, raf = 0, dot = null, prevSelect = '';
+
+  function overflowScrolls(el) {
+    var st = getComputedStyle(el);
+    return /(auto|scroll|overlay)/.test(st.overflowY) && el.scrollHeight - el.clientHeight > 1
+        || /(auto|scroll|overlay)/.test(st.overflowX) && el.scrollWidth - el.clientWidth > 1;
+  }
+
+  /* 从鼠标下的元素往上找第一个真能滚的容器；都没有就滚整个文档 */
+  function scrollerAt(node) {
+    for (var el = node; el && el.nodeType === 1 && el !== document.documentElement; el = el.parentElement) {
+      if (overflowScrolls(el)) return el;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+
+  function canScroll(el) {
+    return el && (el.scrollHeight - el.clientHeight > 1 || el.scrollWidth - el.clientWidth > 1);
+  }
+
+  function showDot(x, y) {
+    if (!dot) {
+      dot = document.createElement('div');
+      dot.setAttribute('data-dida-mid-scroll', '');
+      dot.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;width:21px;height:21px;' +
+        'margin:-10.5px 0 0 -10.5px;border-radius:50%;background:rgba(255,255,255,.94);' +
+        'border:1px solid rgba(15,23,42,.34);box-shadow:0 1px 4px rgba(15,23,42,.18);' +
+        'box-sizing:border-box;transition:opacity .12s';
+      dot.innerHTML = '<span style="position:absolute;left:50%;top:50%;width:4px;height:4px;' +
+        'margin:-2px 0 0 -2px;border-radius:50%;background:rgba(55,65,81,.92)"></span>';
+      document.documentElement.appendChild(dot);
+    }
+    dot.style.left = x + 'px';
+    dot.style.top = y + 'px';
+    dot.style.display = 'block';
+  }
+
+  function hideDot() {
+    if (dot) dot.style.display = 'none';
+  }
+
+  function step(now) {
+    if (!scroller) return;
+    var dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016;
+    last = now;
+
+    var dx = pointer.x - anchor.x;
+    var dy = pointer.y - anchor.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var tvx = 0, tvy = 0;
+
+    if (dist > DEAD) {
+      var h = scroller.clientHeight || document.documentElement.clientHeight || 1;
+      var top = Math.max(MIN_TOP, h * FACTOR);
+      var t = Math.min(1, (dist - DEAD) / TOP_AT);
+      var speed = top * Math.pow(t, POW);
+      tvy = dy / dist * speed;
+      tvx = dx / dist * speed * DAMP;
+    }
+
+    /* 同一套一阶平滑：鼠标停下时不至于瞬间刹住或瞬间冲出去 */
+    var k = 1 - Math.exp(-EASE * dt);
+    vx += (tvx - vx) * k;
+    vy += (tvy - vy) * k;
+
+    if (Math.abs(vx) > 0.5 || Math.abs(vy) > 0.5) {
+      scroller.scrollTop += vy * dt;
+      scroller.scrollLeft += vx * dt;
+    }
+
+    raf = requestAnimationFrame(step);
+  }
+
+  function begin(el, x, y) {
+    finish();
+    scroller = el;
+    anchor = { x: x, y: y };
+    pointer = { x: x, y: y };
+    vx = vy = 0;
+    last = 0;
+    prevSelect = document.documentElement.style.userSelect;
+    document.documentElement.style.userSelect = 'none';
+    showDot(x, y);
+    raf = requestAnimationFrame(step);
+  }
+
+  function finish() {
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    scroller = null;
+    vx = vy = 0;
+    hideDot();
+    document.documentElement.style.userSelect = prevSelect || '';
+  }
+
+  window.addEventListener('mousedown', function (e) {
+    if (e.button === 1) {
+      if (scroller) { e.preventDefault(); e.stopPropagation(); finish(); return; }
+      var el = scrollerAt(e.target);
+      if (!canScroll(el)) return;          /* 不能滚的页面别抢中键 */
+      e.preventDefault();
+      e.stopPropagation();
+      begin(el, e.clientX, e.clientY);
+      return;
+    }
+    if (e.button === 0 && scroller) {      /* 左键只负责退出，不点到底下的东西 */
+      e.preventDefault();
+      e.stopPropagation();
+      finish();
+    }
+  }, true);
+
+  window.addEventListener('mousemove', function (e) {
+    if (!scroller) return;
+    pointer = { x: e.clientX, y: e.clientY };
+    e.stopPropagation();
+  }, true);
+
+  window.addEventListener('wheel', function () {
+    if (scroller) finish();                /* 拨滚轮就交还控制权，这一下照常滚 */
+  }, { capture: true, passive: true });
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && scroller) finish();
+  }, true);
+
+  window.addEventListener('blur', function () { finish(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) finish(); });
 })();
 </script>
 </body>

@@ -9,6 +9,12 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
 
+  <!-- 课表页的「空白点击」判定是纯函数（不碰可视树），放 internal 供单测直接覆盖，
+       不必为了测试把内部判定暴露成公开 API -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="DidaLite.Tests" />
+  </ItemGroup>
+
   <!-- 内嵌同步 API（/sync），只监听本机 5080 -->
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace DidaLite.App.Views;
 
@@ -28,6 +29,11 @@ public partial class CourseDetailContent : UserControl
             new MouseButtonEventHandler(LongNoteCard_Click), handledEventsToo: true);
         OnceNoteCard.AddHandler(MouseLeftButtonUpEvent,
             new MouseButtonEventHandler(OnceNoteCard_Click), handledEventsToo: true);
+
+        // 输入框一露出来就把焦点交过去：点一下备注卡就能直接打字，
+        // 不用再点一次输入框（那一下点击在用户眼里就是「第一次根本没生效」）。
+        LongNoteBox.IsVisibleChanged += (_, e) => FocusEditor(LongNoteBox, e.NewValue);
+        OnceNoteBox.IsVisibleChanged += (_, e) => FocusEditor(OnceNoteBox, e.NewValue);
     }
 
     /// <summary>点「关闭」时执行：课表页收自己的卡片，主界面收右侧面板。</summary>
@@ -59,6 +65,32 @@ public partial class CourseDetailContent : UserControl
         if (IsInsideEditingControls(e.OriginalSource as DependencyObject)) return;
         if (DataContext is ViewModels.ScheduleViewModel { IsEditingOnceNote: false } vm)
             vm.EditOnceNoteCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// 编辑框刚显示出来就把键盘焦点交给它，光标落到正文末尾。
+    /// <para>
+    /// 必须排到 Input 优先级再执行：IsVisibleChanged 触发时输入框刚被设为可见、
+    /// 还没参与这一轮布局，此刻 Focus() 会被「不可见元素不可获得焦点」拒掉。
+    /// 用 Keyboard.Focus 而不是只调 Focus()，是因为宿主（课表页卡片 / 主界面右侧面板）
+    /// 自己也是从点击里拿到的焦点，只设逻辑焦点可能被宿主的键盘焦点抢回去。
+    /// </para>
+    /// </summary>
+    private static void FocusEditor(TextBox box, object? newValue)
+    {
+        if (newValue is not true) return;
+
+        box.Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        {
+            if (!box.IsVisible) return;
+
+            box.Focus();
+            Keyboard.Focus(box);
+
+            // 继续写而不是覆盖：有内容时光标停在末尾
+            box.CaretIndex = box.Text?.Length ?? 0;
+            box.ScrollToEnd();
+        }));
     }
 
     /// <summary>

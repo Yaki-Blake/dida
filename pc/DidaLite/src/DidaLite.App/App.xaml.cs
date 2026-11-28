@@ -1,6 +1,7 @@
 using System.IO;
 using System.Threading;
 using System.Windows;
+using DidaLite.App.Behaviors;
 using DidaLite.App.Services;
 using DidaLite.App.Views;
 
@@ -46,6 +47,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // 全局滚轮自动滚动：装在 ScrollViewer 类型上，窗口建出来之前先挂好，
+        // 之后所有页面（含设置、详情这些独立窗口）自动生效
+        MiddleDragScroll.Install();
 
         // 托盘里已经有一份在跑：叫它把窗口显示出来，这一份立刻退出，
         // 不必再走一遍建窗、读库、布局。
